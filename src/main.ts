@@ -12,6 +12,7 @@ import { makePlaceholder } from './content/placeholders';
 import { AD_SIZES, makeAd, type AdFormat } from './content/adGenerator';
 import { ROUTE, WAYPOINTS } from './world/route';
 import { makeCanvasTexture } from './utils/canvasText';
+import { buildStreets, buildStreetsShibuya, buildStreetsRamp, buildStreetsBridge } from './world/streets';
 
 /**
  * TEMP sanity scene for Task 4 verification: a grid of emissive-magenta boxes with a
@@ -216,6 +217,14 @@ function boot(): void {
 
     // Task 6 verification: the authored city route spline + labeled waypoint markers.
     registerAsset('routeDebug', () => buildRouteDebug());
+
+    // Task 7 verification: the full street network, plus zoomed-in sub-assets for the
+    // Shibuya crossing and a ramp jump (the whole network is ~1800m long, too big to
+    // judge fine detail in one auto-framed shot).
+    registerAsset('streets', (rng) => buildStreets(rng));
+    registerAsset('streetsShibuya', (rng) => buildStreetsShibuya(rng));
+    registerAsset('streetsRamp', (rng) => buildStreetsRamp(rng));
+    registerAsset('streetsBridge', (rng) => buildStreetsBridge(rng));
 
     runViewer();
     return;
