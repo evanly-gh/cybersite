@@ -12,13 +12,15 @@ export function makeCanvasTexture(
   h: number,
   draw: (ctx: CanvasRenderingContext2D) => void
 ): THREE.CanvasTexture {
-  const canvas = new OffscreenCanvas(w, h);
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Failed to get 2D context');
 
   draw(ctx);
 
-  const texture = new THREE.CanvasTexture(canvas as unknown as HTMLCanvasElement);
+  const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 4;
   return texture;

@@ -1,19 +1,7 @@
 import * as THREE from 'three';
 import { COLORS } from '../theme';
 import { getAsset, listAssets, type AssetEntry } from './registry';
-
-// replaced by utils/rng in Task 3
-type Rng = () => number;
-
-function mulberry32(seed: number): Rng {
-  let a = seed >>> 0;
-  return function next(): number {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+import { makeRng } from '../utils/rng';
 
 function hexColor(n: number): string {
   return '#' + n.toString(16).padStart(6, '0');
@@ -79,7 +67,7 @@ export function runViewer(): void {
       // On throw, show the diagnostic and fall through to render + __READY so the
       // harness screenshots the error instead of hanging 30s per angle.
       try {
-        const rng = mulberry32(1);
+        const rng = makeRng(1);
         const entry: AssetEntry = make(rng);
         const object = entry instanceof THREE.Object3D ? entry : entry.group;
         const update = entry instanceof THREE.Object3D ? undefined : entry.update;
