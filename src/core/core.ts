@@ -17,6 +17,11 @@ export interface Core {
   quality: 0 | 1 | 2;
 }
 
+/** Scene-wide FogExp2 density. Exported so custom ShaderMaterials that replicate the
+ * fog math by hand (e.g. farField's skyline shader, which can't pull in the built-in
+ * fog_fragment chunk) stay in lockstep with the real scene fog by construction. */
+export const FOG_DENSITY = 0.0016;
+
 const MAX_DPR_FULL = 1.75;
 const MAX_DPR_MED = 1.25;
 const MAX_DPR_LOW = 1;
@@ -73,7 +78,7 @@ export function initCore(canvas: HTMLCanvasElement): Core {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(COLORS.void);
-  scene.fog = new THREE.FogExp2(COLORS.void, 0.0016);
+  scene.fog = new THREE.FogExp2(COLORS.void, FOG_DENSITY);
 
   const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 4000);
   camera.position.set(0, 0, 10);

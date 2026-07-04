@@ -3,6 +3,7 @@ import { COLORS } from '../theme';
 import type { Rng } from '../utils/rng';
 import { makeCanvasTexture } from '../utils/canvasText';
 import { MOON_POS, MOON_RADIUS } from './route';
+import { FOG_DENSITY } from '../core/core';
 
 /**
  * Task 8: the far-field backdrop — Ring 2 skyline, sky dome, rising moon, and ocean.
@@ -36,7 +37,6 @@ export const FAR_SKYLINE_COUNT = 450;
 const FAR_SKYLINE_DIM = 0.45;
 
 const WINDOW_PITCH = 3.4; // meters per window cell, both axes
-const FOG_DENSITY = 0.0016; // must match core.ts scene.fog (FogExp2) — see uFogDensity note below
 
 // ---------------------------------------------------------------------------------
 // Skyline instance data
@@ -244,7 +244,7 @@ function buildSkylineMaterial(dim: number): THREE.ShaderMaterial {
       uAmber: { value: new THREE.Color(COLORS.sodiumAmber) },
       uTeal: { value: new THREE.Color(COLORS.holoTeal) },
       uMagenta: { value: new THREE.Color(COLORS.signalMagenta) },
-      uBody: { value: new THREE.Color(0x0a0c16) },
+      uBody: { value: new THREE.Color(COLORS.towerBody) },
       uDim: { value: dim }
     },
     vertexShader: SKYLINE_VERTEX,
@@ -367,12 +367,12 @@ function buildSky(): THREE.Mesh {
   const mat = new THREE.ShaderMaterial({
     uniforms: {
       uVoid: { value: new THREE.Color(COLORS.void) },
-      uHorizon: { value: new THREE.Color(0x0b0e1e) },
+      uHorizon: { value: new THREE.Color(COLORS.skyHorizon) },
       // Calibration fix: an amber haze here read as warm daylight fog, violating the
       // night-mood brief ("kill the amber horizon glow"). A real light-polluted night
       // sky stains blue-violet, not amber, once you're this far from the source — swap
       // hue and cut the amplitude so it's a subtle tint, not a wash.
-      uHaze: { value: new THREE.Color(0x2a1e55) }
+      uHaze: { value: new THREE.Color(COLORS.nightHaze) }
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
