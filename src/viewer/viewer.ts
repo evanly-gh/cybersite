@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { COLORS } from '../theme';
 import { getAsset, listAssets, type AssetEntry } from './registry';
 import { makeRng } from '../utils/rng';
+import { initCore } from '../core/core';
 
 function hexColor(n: number): string {
   return '#' + n.toString(16).padStart(6, '0');
@@ -20,8 +21,9 @@ function showMessage(text: string): void {
  * Reads `?viewer=<name>&angle=<0-3>&t=<0..1>` from location.search, builds a minimal
  * preview scene for the requested registered asset, frames the camera at one of four
  * orbit angles (45° azimuth steps, 20° elevation), and exposes `window.__READY = true`
- * once the first frame has been rendered. Bloom composer arrives with core/core.ts in
- * Task 4 — for now this uses a plain WebGLRenderer.
+ * once the first frame has been rendered. Uses core/core.ts for a consistent
+ * bloom/tonemap/vignette look; the viewer renders a single static frame via
+ * `core.render()` rather than starting core's animation loop.
  */
 export function runViewer(): void {
   const params = new URLSearchParams(location.search);
@@ -35,13 +37,11 @@ export function runViewer(): void {
   document.body.style.margin = '0';
   document.body.style.overflow = 'hidden';
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(1);
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  document.body.appendChild(renderer.domElement);
+  const canvas = document.createElement('canvas');
+  document.body.appendChild(canvas);
 
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(COLORS.void);
+  const core = initCore(canvas);
+  const { scene, camera } = core;
 
   const grid = new THREE.GridHelper(40, 40, COLORS.holoTeal, COLORS.shadowBlue);
   scene.add(grid);
@@ -53,7 +53,6 @@ export function runViewer(): void {
   key.position.set(5, 8, 5);
   scene.add(key);
 
-  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 500);
   camera.position.set(0, 3, 8);
   camera.lookAt(0, 0, 0);
 
@@ -107,13 +106,6 @@ export function runViewer(): void {
     }
   }
 
-  function onResize(): void {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  }
-  window.addEventListener('resize', onResize);
-
-  renderer.render(scene, camera);
+  core.render();
   window.__READY = true;
 }
