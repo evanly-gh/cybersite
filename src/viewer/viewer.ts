@@ -40,6 +40,8 @@ export function runViewer(): void {
   const name = params.get('viewer');
   const angleIndex = Number(params.get('angle') ?? '0');
   const t = Number(params.get('t') ?? '0.5');
+  // Fixed ambient time (seconds) so screenshots stay deterministic — not wall-clock.
+  const sec = Number(params.get('sec') ?? '2');
 
   document.body.innerHTML = '';
   document.body.style.margin = '0';
@@ -74,39 +76,46 @@ export function runViewer(): void {
     if (!make) {
       showMessage(`viewer: unknown asset "${name}". registered: ${listAssets().join(', ') || '(none)'}`);
     } else {
-      const rng = mulberry32(1);
-      const entry: AssetEntry = make(rng);
-      const object = entry instanceof THREE.Object3D ? entry : entry.group;
-      const update = entry instanceof THREE.Object3D ? undefined : entry.update;
-      const updateAmbient = entry instanceof THREE.Object3D ? undefined : entry.updateAmbient;
+      // On throw, show the diagnostic and fall through to render + __READY so the
+      // harness screenshots the error instead of hanging 30s per angle.
+      try {
+        const rng = mulberry32(1);
+        const entry: AssetEntry = make(rng);
+        const object = entry instanceof THREE.Object3D ? entry : entry.group;
+        const update = entry instanceof THREE.Object3D ? undefined : entry.update;
+        const updateAmbient = entry instanceof THREE.Object3D ? undefined : entry.updateAmbient;
 
-      scene.add(object);
+        scene.add(object);
 
-      // Center the asset over the origin and rest it on the ground grid.
-      const initialBox = new THREE.Box3().setFromObject(object);
-      const center = initialBox.getCenter(new THREE.Vector3());
-      object.position.x -= center.x;
-      object.position.z -= center.z;
-      object.position.y -= initialBox.min.y;
+        // Center the asset over the origin and rest it on the ground grid.
+        const initialBox = new THREE.Box3().setFromObject(object);
+        const center = initialBox.getCenter(new THREE.Vector3());
+        object.position.x -= center.x;
+        object.position.z -= center.z;
+        object.position.y -= initialBox.min.y;
 
-      if (update) update(t);
-      if (updateAmbient) updateAmbient(t);
+        if (update) update(t);
+        if (updateAmbient) updateAmbient(sec);
 
-      const framedBox = new THREE.Box3().setFromObject(object);
-      const sphere = framedBox.getBoundingSphere(new THREE.Sphere());
-      const radius = Math.max(sphere.radius, 0.5);
-      const fovRad = THREE.MathUtils.degToRad(camera.fov);
-      const distance = (radius / Math.sin(fovRad / 2)) * 1.6;
+        const framedBox = new THREE.Box3().setFromObject(object);
+        const sphere = framedBox.getBoundingSphere(new THREE.Sphere());
+        const radius = Math.max(sphere.radius, 0.5);
+        const fovRad = THREE.MathUtils.degToRad(camera.fov);
+        const distance = (radius / Math.sin(fovRad / 2)) * 1.6;
 
-      const azimuth = THREE.MathUtils.degToRad(angleIndex * 45);
-      const elevation = THREE.MathUtils.degToRad(20);
-      const focus = sphere.center;
-      camera.position.set(
-        focus.x + distance * Math.cos(elevation) * Math.sin(azimuth),
-        focus.y + distance * Math.sin(elevation),
-        focus.z + distance * Math.cos(elevation) * Math.cos(azimuth)
-      );
-      camera.lookAt(focus);
+        const azimuth = THREE.MathUtils.degToRad(angleIndex * 45);
+        const elevation = THREE.MathUtils.degToRad(20);
+        const focus = sphere.center;
+        camera.position.set(
+          focus.x + distance * Math.cos(elevation) * Math.sin(azimuth),
+          focus.y + distance * Math.sin(elevation),
+          focus.z + distance * Math.cos(elevation) * Math.cos(azimuth)
+        );
+        camera.lookAt(focus);
+      } catch (err) {
+        console.error(`viewer: asset "${name}" threw`, err);
+        showMessage(`viewer: asset "${name}" threw: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   }
 
