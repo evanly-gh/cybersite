@@ -92,7 +92,9 @@ export const RESUME: Resume = {
     {
       title: 'Mandarin Learning App',
       stack: 'React Native, Supabase Edge, Gemini 2.0',
-      blurb: 'Mobile Mandarin tutor with a JWT-gated LLM proxy guarding Gemini 2.0 calls.',
+      blurb:
+        'Mobile Mandarin tutor: JWT-gated Deno Edge proxy to Gemini 2.0 returns ' +
+        'structured JSON for inline grammar corrections.',
       image: { src: null, w: 800, h: 600, label: 'MANDARIN APP' }
     },
     {
@@ -135,47 +137,62 @@ export const RESUME: Resume = {
     honors: 'Interdisciplinary Honors Program',
     graduation: 'Expected June 2027',
     gpa: '3.9',
-    coursework: [
-      'Machine Learning',
-      'Deep Learning Systems',
-      'Data Structures & Algorithms',
-      'Computer Systems',
-      'Probability & Statistics',
-      'Econometrics'
-    ]
+    coursework: ['Deep Learning', 'Data Structures & Parallelism', 'HW/SW Interface', 'Statistical Methods']
   },
 
   skills: {
-    Languages: ['Python', 'TypeScript', 'C++', 'SQL'],
-    'ML Frameworks': ['PyTorch', 'HF Transformers', 'scikit-learn', 'timm'],
-    Techniques: [
-      'Test-Time Training',
-      'Model Compression / Quantization',
-      'Contrastive Learning (CLIP)',
-      'Zero-Shot Classification'
+    Languages: ['Python', 'TypeScript', 'JavaScript', 'Java', 'C/C++', 'SQL'],
+    'ML Frameworks': [
+      'PyTorch',
+      'HuggingFace Transformers',
+      'scikit-learn',
+      'OpenCV',
+      'MediaPipe',
+      'CLIP',
+      'SegFormer'
     ],
-    Infrastructure: ['FastAPI', 'pgvector', 'Supabase Edge Functions', 'Docker'],
-    'AI Dev Tools': ['Gemini 2.0 API', 'HF Hub', 'Weights & Biases', 'llama.cpp']
+    Techniques: [
+      'Fine-tuning',
+      'Meta-learning (MAML/TTT)',
+      'RAG',
+      'Zero-shot classification',
+      'GGUF quantization',
+      'Evals design',
+      'Vector search'
+    ],
+    Infrastructure: [
+      'FastAPI',
+      'Docker',
+      'AWS',
+      'Supabase',
+      'pgvector',
+      'llama.cpp',
+      'Git',
+      'HuggingFace Spaces'
+    ],
+    'AI Dev Tools': ['Cursor', 'Claude Code', 'GitHub Copilot']
   },
 
   experience: [
     {
       role: 'Undergraduate Researcher',
       org: 'Mobile Intelligence Lab, University of Washington',
-      period: '2025 – Present',
+      period: 'Spring 2026 – Present',
       detail:
         'microLLM research under the MAM project — model compression and ' +
         'on-device inference for mobile/edge, advised by Wen Cheng.'
     },
     {
-      role: 'Team Member',
+      role: 'Associate',
       org: 'Panera Bread',
-      period: '2023, 2025'
+      period: 'Jun–Dec 2023 · Jun–Aug 2025',
+      detail: 'Issaquah, WA'
     },
     {
-      role: 'Sales Associate',
-      org: 'Ross',
-      period: '2023'
+      role: 'Retail Associate',
+      org: 'Ross Dress For Less',
+      period: 'Jun–Sep 2023',
+      detail: 'Issaquah, WA'
     }
   ],
 
