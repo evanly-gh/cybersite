@@ -193,24 +193,33 @@ const SKYLINE_FRAGMENT = /* glsl */ `
     float hLit = hash(cell, vSeed);
     float hColor = hash(cell + vec2(17.0, 5.0), vSeed);
     float hFlicker = hash(cell + vec2(91.0, 41.0), vSeed);
+    float hPeak = hash(cell + vec2(53.0, 29.0), vSeed);
 
     float lit = step(hLit, 0.55);
 
     vec3 winColor = mix(uAmber, uTeal, step(0.4, hColor));
     winColor = mix(winColor, uMagenta, step(0.75, hColor));
 
+    // Calibration: night-mood windows are punctuation, not wallpaper. Most lit windows
+    // sit at a low, clearly-colored glow (won't cross the bloom threshold); only ~5%
+    // of windows pop to a bloom-eligible peak — that's what should read as bright dots
+    // scattered across an otherwise dark facade.
+    float peak = step(0.95, hPeak);
+    float level = mix(0.32, 1.6, peak);
+
     float flickerMask = step(0.98, hFlicker);
     float flickerWave = sin(uTime * (2.5 + hFlicker * 7.0) + hFlicker * 41.0) * 0.5 + 0.5;
-    float brightness = lit * mix(1.0, mix(0.1, 1.0, flickerWave), flickerMask);
+    float brightness = lit * level * mix(1.0, mix(0.1, 1.0, flickerWave), flickerMask);
 
     float margin = 0.16;
     float windowMask = step(margin, cellUv.x) * step(margin, cellUv.y) *
                         step(cellUv.x, 1.0 - margin) * step(cellUv.y, 1.0 - margin);
 
-    float winB = brightness * windowMask * isSide;
+    float winVisible = lit * windowMask * isSide;
+    vec3 winEmissive = winColor * brightness * uDim;
 
     vec3 body = uBody * (0.65 + 0.35 * cellUv.y);
-    vec3 result = mix(body, winColor * 1.7 * uDim, winB);
+    vec3 result = mix(body, winEmissive, winVisible);
 
     // Manual FogExp2 replica (core.ts owns scene.fog; a from-scratch ShaderMaterial can't
     // pull in the fog_fragment chunk, so match its math here) with lit windows punching
@@ -219,7 +228,7 @@ const SKYLINE_FRAGMENT = /* glsl */ `
     // layer at ~1800m) also weakens the punch-through so that layer reads as a fainter,
     // more fog-buried silhouette behind the primary skyline.
     float fogFactor = 1.0 - exp(-uFogDensity * uFogDensity * vFogDepth * vFogDepth);
-    float effectiveFog = fogFactor * (1.0 - winB * 0.85 * uDim);
+    float effectiveFog = fogFactor * (1.0 - winVisible * 0.85 * uDim);
     result = mix(result, uFogColor, clamp(effectiveFog, 0.0, 1.0));
 
     gl_FragColor = vec4(result, 1.0);
@@ -305,10 +314,13 @@ interface Beacon {
 
 function makeRadialGlowTexture(): THREE.CanvasTexture {
   return makeCanvasTexture(128, 128, (ctx) => {
+    // Calibration fix: steeper falloff than the original (0.35 stop at 0.18 opacity)
+    // so glow sources (moon halo, rooftop beacons) read as a tight bright core with a
+    // quick taper instead of a broad soft wash that bloom then smears even further.
     const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
     g.addColorStop(0, 'rgba(255,255,255,1)');
-    g.addColorStop(0.12, 'rgba(255,255,255,0.7)');
-    g.addColorStop(0.35, 'rgba(255,255,255,0.18)');
+    g.addColorStop(0.1, 'rgba(255,255,255,0.55)');
+    g.addColorStop(0.22, 'rgba(255,255,255,0.1)');
     g.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, 128, 128);
@@ -356,10 +368,11 @@ function buildSky(): THREE.Mesh {
     uniforms: {
       uVoid: { value: new THREE.Color(COLORS.void) },
       uHorizon: { value: new THREE.Color(0x0b0e1e) },
-      // Round-3 iteration: warm light-pollution haze hugging the horizon line, the way
-      // a real city skyline stains the low sky amber even well away from the source —
-      // reinforces "endless city" beyond what individual building silhouettes can sell.
-      uHaze: { value: new THREE.Color(COLORS.sodiumAmber) }
+      // Calibration fix: an amber haze here read as warm daylight fog, violating the
+      // night-mood brief ("kill the amber horizon glow"). A real light-polluted night
+      // sky stains blue-violet, not amber, once you're this far from the source — swap
+      // hue and cut the amplitude so it's a subtle tint, not a wash.
+      uHaze: { value: new THREE.Color(0x2a1e55) }
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -378,8 +391,9 @@ function buildSky(): THREE.Mesh {
         vec3 color = mix(uHorizon, uVoid, t);
 
         // Tight exponential band around the horizon (vDir.y == 0), biased to sit mostly
-        // at/above the skyline rather than washing the whole lower sky.
-        float haze = exp(-abs(vDir.y) * 14.0) * 0.22;
+        // at/above the skyline rather than washing the whole lower sky. Kept subtle —
+        // this is a faint light-pollution tint, not a glow.
+        float haze = exp(-abs(vDir.y) * 14.0) * 0.10;
         color += uHaze * haze;
 
         gl_FragColor = vec4(color, 1.0);
@@ -474,19 +488,25 @@ function buildMoon(rng: Rng): THREE.Group {
   sphere.frustumCulled = false;
   group.add(sphere);
 
+  // Calibration fix: the moon itself is allowed to stay a bright "money shot," but its
+  // additive glow sprite was wide/strong enough that UnrealBloomPass (screen-space,
+  // owned by core.ts — not tunable here) smeared it across the entire lower frame,
+  // washing the ocean into a grey sheet instead of leaving it dark around a narrow
+  // glitter streak. Shrinking + dimming the glow source starves that bloom bleed at
+  // the source without touching bloom itself or the moon's own core brightness.
   const glowTex = makeRadialGlowTexture();
   const glowMat = new THREE.SpriteMaterial({
     map: glowTex,
     color: COLORS.moonlight,
     transparent: true,
-    opacity: 0.4,
+    opacity: 0.22,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     fog: false
   });
   const glow = new THREE.Sprite(glowMat);
   glow.position.copy(MOON_POS);
-  const glowDiameter = MOON_RADIUS * 2.2 * 2;
+  const glowDiameter = MOON_RADIUS * 1.35 * 2;
   glow.scale.set(glowDiameter, glowDiameter, 1);
   group.add(glow);
 
@@ -506,18 +526,20 @@ function buildOcean(): THREE.Mesh {
   const geo = new THREE.PlaneGeometry(OCEAN_WIDTH, OCEAN_DEPTH, 1, 1);
   geo.rotateX(-Math.PI / 2);
 
-  const oceanColor = new THREE.Color(COLORS.void).lerp(new THREE.Color(COLORS.shadowBlue), 0.18);
+  const oceanColor = new THREE.Color(COLORS.void).lerp(new THREE.Color(COLORS.shadowBlue), 0.1);
   const mat = new THREE.MeshPhysicalMaterial({
     color: oceanColor,
     roughness: 0.08,
     metalness: 0,
-    // MeshPhysicalMaterial's specularIntensity scales the dielectric Fresnel term
-    // directly (unlike metalness, which only re-tints it toward the albedo). At
-    // roughness 0.08 a full-strength (1.0) dielectric highlight from any bright key
-    // light turns this huge plane into a blown-out grey slab that swallows the
-    // moon-glitter streak sitting on top of it — dial the highlight down instead of
-    // fighting scene lighting we don't own.
-    specularIntensity: 0.2,
+    // Calibration fix: even at 0.2, specularIntensity let the viewer harness's bright
+    // directional key light turn this huge plane into a wide, blown-out mirror sheen —
+    // full-surface shine instead of a narrow moon-glitter streak. The night-mood brief
+    // wants the ocean itself near-black, with the *only* highlight being the dedicated
+    // glitter-streak mesh drawn on top. Killing specularIntensity removes the
+    // dielectric Fresnel highlight entirely (still leaves roughness at the brief's
+    // mandated 0.08, just with nothing to specularly reflect) while the ambient/hemi
+    // light still gives it a faint diffuse presence rather than pure flat black.
+    specularIntensity: 0,
     specularColor: oceanColor
   });
 
@@ -558,9 +580,12 @@ const GLITTER_FRAGMENT = /* glsl */ `
   void main() {
     vec2 p = vec2(vUv.x * 6.0, vUv.y * 44.0 - uTime * 1.6);
     float streak = noise(p) * noise(p * 2.3 + 11.0);
-    float edge = pow(1.0 - abs(vUv.x * 2.0 - 1.0), 1.6);
+    // Calibration fix: steeper center-weighted falloff (was 1.6) so the streak reads as
+    // a narrow bright thread down its own centerline rather than a solid glowing band
+    // edge-to-edge across its already-generous near width.
+    float edge = pow(1.0 - abs(vUv.x * 2.0 - 1.0), 4.0);
     float alpha = streak * edge;
-    gl_FragColor = vec4(uColor, alpha * 0.85);
+    gl_FragColor = vec4(uColor, alpha * 0.8);
   }
 `;
 
@@ -569,8 +594,13 @@ function buildGlitter(): { mesh: THREE.Mesh; material: THREE.ShaderMaterial } {
   const xCenter = MOON_POS.x;
   const zNear = OCEAN_Z - 30;
   const zFar = MOON_POS.z;
-  const widthNear = 90;
-  const widthFar = 18;
+  // Calibration fix: at the brief's bridge-eye cam (6m above the water, only ~40m from
+  // this mesh's near edge) the original 90m near-width was *wider than the camera's
+  // entire frustum* at that distance — it wasn't reading as a streak at all, it was
+  // filling the whole screen width and reading as a full-surface sheen. Narrowed so it
+  // stays a clearly-bounded bright thread even from a low, close-up vantage.
+  const widthNear = 22;
+  const widthFar = 6;
   const y = OCEAN_Y + 0.02;
 
   const positions = new Float32Array([
