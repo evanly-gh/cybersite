@@ -1,7 +1,5 @@
 import type * as THREE from 'three';
-
-// replaced by utils/rng in Task 3
-type Rng = () => number;
+import type { Rng } from '../utils/rng';
 
 export type AssetEntry =
   | THREE.Object3D
