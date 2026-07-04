@@ -440,23 +440,32 @@ const ABOUT_X0 = ABOUT_CENTER_X - ABOUT_LEN / 2;
 const ABOUT_X1 = ABOUT_CENTER_X + ABOUT_LEN / 2;
 
 function buildAboutStreet(): { road: GeometryPart[]; curb: GeometryPart[]; marking: GeometryPart[] } {
+  // Markings and sidewalks stop at the plaza's WEST edge (x = 220): markings sit at
+  // y 0.02-0.025 (above the plaza top at y 0.02) and sidewalks at y 0.15, so running them
+  // through the plaza footprint would cut painted stripes / raised strips straight through
+  // the scramble-crossing decal. The road slab itself still runs to ABOUT_X1 underneath the
+  // plaza (its top at y = 0 is fully covered by the plaza slab's top at y = 0.02).
+  const clipX = WAYPOINTS.shibuyaCenter.x - PLAZA_SIZE / 2;
+  const clippedLen = clipX - ABOUT_X0;
+  const clippedCenter = ABOUT_X0 + clippedLen / 2;
+
   const road = [flatRoadPart(ABOUT_CENTER_X, 0, ABOUT_LEN, STREET_WIDTH)];
   const curb = [
     boxPart(
-      new THREE.Vector3(ABOUT_CENTER_X, CURB_H / 2, SIDEWALK_OFFSET),
-      new THREE.Vector3(ABOUT_LEN, CURB_H, SIDEWALK_W)
+      new THREE.Vector3(clippedCenter, CURB_H / 2, SIDEWALK_OFFSET),
+      new THREE.Vector3(clippedLen, CURB_H, SIDEWALK_W)
     ),
     boxPart(
-      new THREE.Vector3(ABOUT_CENTER_X, CURB_H / 2, -SIDEWALK_OFFSET),
-      new THREE.Vector3(ABOUT_LEN, CURB_H, SIDEWALK_W)
+      new THREE.Vector3(clippedCenter, CURB_H / 2, -SIDEWALK_OFFSET),
+      new THREE.Vector3(clippedLen, CURB_H, SIDEWALK_W)
     )
   ];
   const marking: GeometryPart[] = [
-    solidAlongX(HALF_STREET - 0.15, ABOUT_X0, ABOUT_X1),
-    solidAlongX(-HALF_STREET + 0.15, ABOUT_X0, ABOUT_X1),
-    solidAlongX(0, ABOUT_X0, ABOUT_X1),
-    ...dashesAlongX(HALF_STREET / 2, ABOUT_X0, ABOUT_X1),
-    ...dashesAlongX(-HALF_STREET / 2, ABOUT_X0, ABOUT_X1)
+    solidAlongX(HALF_STREET - 0.15, ABOUT_X0, clipX),
+    solidAlongX(-HALF_STREET + 0.15, ABOUT_X0, clipX),
+    solidAlongX(0, ABOUT_X0, clipX),
+    ...dashesAlongX(HALF_STREET / 2, ABOUT_X0, clipX),
+    ...dashesAlongX(-HALF_STREET / 2, ABOUT_X0, clipX)
   ];
   return { road, curb, marking };
 }
@@ -482,10 +491,14 @@ function buildBoulevard(): { road: GeometryPart[]; curb: GeometryPart[]; marking
   const marking: GeometryPart[] = [];
   const reflector: GeometryPart[] = [];
 
-  const zTop = WAYPOINTS.driftExit.z; // -30
+  // Boulevard surfaces start flush with the plaza slab's south edge (-PLAZA_SIZE/2 = -20),
+  // NOT at driftExit (-30): the plaza only covers z in [-20, +20], so keying off driftExit
+  // left a 10m hole in the drivable surface between the plaza and the first road segment.
+  // Exact abutment at z = -20 (no overlap), so there's no double-stacked z-fight either.
+  const zTop = -PLAZA_SIZE / 2;
   const zBottom = WAYPOINTS.skywayStart.z; // -420
 
-  // Flat segments between driftExit / ramp1 / ramp2 / skywayStart, skipping the wedge + gap zones.
+  // Flat segments between plaza edge / ramp1 / ramp2 / skywayStart, skipping the wedge + gap zones.
   const segments: Array<[number, number]> = [
     [zTop, RAMPS[0].base.z],
     [RAMPS[0].land.z - RAMP_LEN, RAMPS[1].base.z],
@@ -849,16 +862,23 @@ export function buildStreetsShibuya(rng: Rng): THREE.Group {
   const shibuya = buildShibuya(materials);
 
   const stub = 25;
+  // Stubs mirror production layout: About street approaches from the WEST (production's
+  // slab ends at x = 250, inside the plaza — there is no street east of it), boulevard
+  // leaves south, both abutting the plaza edges exactly like buildAboutStreet/buildBoulevard.
+  const westEdge = WAYPOINTS.shibuyaCenter.x - PLAZA_SIZE / 2;
+  const southEdge = -PLAZA_SIZE / 2;
   const roadParts = [
     ...shibuya.road,
-    flatRoadPart(WAYPOINTS.shibuyaCenter.x + PLAZA_SIZE / 2 + stub / 2, 0, stub, STREET_WIDTH),
-    flatRoadPart(BLVD_X, -PLAZA_SIZE / 2 - stub / 2, STREET_WIDTH, stub)
+    flatRoadPart(westEdge - stub / 2, 0, stub, STREET_WIDTH),
+    flatRoadPart(BLVD_X, southEdge - stub / 2, STREET_WIDTH, stub)
   ];
   const markingParts = [
-    solidAlongX(HALF_STREET - 0.15, PLAZA_SIZE / 2, PLAZA_SIZE / 2 + stub),
-    solidAlongX(-HALF_STREET + 0.15, PLAZA_SIZE / 2, PLAZA_SIZE / 2 + stub),
-    solidAlongZ(BLVD_X + HALF_STREET - 0.15, -PLAZA_SIZE / 2, -PLAZA_SIZE / 2 - stub),
-    solidAlongZ(BLVD_X - HALF_STREET + 0.15, -PLAZA_SIZE / 2, -PLAZA_SIZE / 2 - stub)
+    solidAlongX(HALF_STREET - 0.15, westEdge - stub, westEdge),
+    solidAlongX(-HALF_STREET + 0.15, westEdge - stub, westEdge),
+    ...dashesAlongX(HALF_STREET / 2, westEdge - stub, westEdge),
+    ...dashesAlongX(-HALF_STREET / 2, westEdge - stub, westEdge),
+    solidAlongZ(BLVD_X + HALF_STREET - 0.15, southEdge, southEdge - stub),
+    solidAlongZ(BLVD_X - HALF_STREET + 0.15, southEdge, southEdge - stub)
   ];
 
   group.add(mergeOne(roadParts, materials.road));
