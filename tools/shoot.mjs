@@ -10,8 +10,19 @@ async function snap(url, file) {
   await page.screenshot({ path: `${args.out ?? 'shots'}/${file}` }); console.log('saved', file);
 }
 if (args.viewer) {
-  const n = Number(args.angles ?? 4);
-  for (let a = 0; a < n; a++) await snap(`${base}/?viewer=${args.viewer}&angle=${a}&t=${args.t ?? 0.5}`, `${args.viewer}-a${a}.png`);
+  if (args.cam) {
+    // Absolute camera override (world-scale assets like farField) — one shot, no angle
+    // sweep, since ?cam= fully determines the view. --tag distinguishes multiple shots
+    // of the same viewer (e.g. bridge-eye vs. street-level).
+    const suffix = args.tag ? `-${args.tag}` : '-cam';
+    await snap(
+      `${base}/?viewer=${args.viewer}&cam=${args.cam}&t=${args.t ?? 0.5}&sec=${args.sec ?? 2}`,
+      `${args.viewer}${suffix}.png`
+    );
+  } else {
+    const n = Number(args.angles ?? 4);
+    for (let a = 0; a < n; a++) await snap(`${base}/?viewer=${args.viewer}&angle=${a}&t=${args.t ?? 0.5}`, `${args.viewer}-a${a}.png`);
+  }
 } else {
   for (const s of String(args.scroll ?? '0').split(',')) await snap(`${base}/?shot=${s}`, `scroll-${s}.png`);
 }

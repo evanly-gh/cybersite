@@ -13,6 +13,7 @@ import { AD_SIZES, makeAd, type AdFormat } from './content/adGenerator';
 import { ROUTE, WAYPOINTS } from './world/route';
 import { makeCanvasTexture } from './utils/canvasText';
 import { buildStreets, buildStreetsShibuya, buildStreetsRamp, buildStreetsBridge } from './world/streets';
+import { buildFarField } from './world/farField';
 
 /**
  * TEMP sanity scene for Task 4 verification: a grid of emissive-magenta boxes with a
@@ -225,6 +226,11 @@ function boot(): void {
     registerAsset('streetsShibuya', (rng) => buildStreetsShibuya(rng));
     registerAsset('streetsRamp', (rng) => buildStreetsRamp(rng));
     registerAsset('streetsBridge', (rng) => buildStreetsBridge(rng));
+
+    // Task 8 verification: Ring 2 skyline + sky/moon/ocean backdrop. World-scale (sky
+    // dome r=3200m) — always view this one via `?cam=` (see viewer.ts), not the default
+    // auto-framed turntable.
+    registerAsset('farField', (rng) => buildFarField(rng));
 
     runViewer();
     return;
