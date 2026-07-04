@@ -1,0 +1,50 @@
+:root {
+  --void: #07080f;
+  --shadow-blue: #101426;
+  --tron-cyan: #00f0ff;
+  --signal-magenta: #ff2bd6;
+  --sodium-amber: #ffb347;
+  --holo-teal: #b7f5e9;
+  --moonlight: #f5f0e6;
+}
+
+html {
+  background: var(--void);
+  font-family: 'Rajdhani', sans-serif;
+  color: var(--moonlight);
+}
+
+.display {
+  font-family: 'Unbounded', serif;
+}
+
+.mono {
+  font-family: 'Share Tech Mono', monospace;
+}
+
+#hero {
+  height: 100vh;
+  width: 100vw;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  position: fixed;
+  top: 0;
+  left: 0;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+}
+
+main {
+  margin: 0;
+  padding: 0;
+}
