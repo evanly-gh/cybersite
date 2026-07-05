@@ -778,6 +778,9 @@ export function buildBillboard(rng: Rng, o: BillboardOptions): Billboard {
   group.userData.flickers = flickers;
 
   let screenTex: THREE.Texture = texture;
+  // The default screen texture is created internally (via makeAd) and is
+  // owned by this module; a caller-provided texture (o.texture) is not.
+  let screenTexOwned = o.texture === undefined;
   function applyScrollWrap(t: THREE.Texture): void {
     if (scrolls) {
       t.wrapS = THREE.RepeatWrapping;
@@ -787,7 +790,11 @@ export function buildBillboard(rng: Rng, o: BillboardOptions): Billboard {
   applyScrollWrap(screenTex);
 
   function setTexture(t: THREE.Texture): void {
+    if (screenTexOwned && screenTex !== t) {
+      screenTex.dispose();
+    }
     screenTex = t;
+    screenTexOwned = false;
     applyScrollWrap(t);
     screenMat.emissiveMap = t;
     screenMat.needsUpdate = true;

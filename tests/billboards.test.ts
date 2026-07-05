@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as THREE from 'three';
 import { makeRng } from '../src/utils/rng';
 
@@ -87,6 +87,23 @@ describe('billboards', () => {
     const replacement = new THREE.Texture();
     bb.setTexture(replacement);
     expect(mat.emissiveMap).toBe(replacement);
+  });
+
+  it('setTexture disposes the previously owned default texture, and a second call does not throw', () => {
+    const bb = buildBillboard(makeRng(5), { format: 'portrait', mount: 'wall' });
+    const screen = bb.group.getObjectByName('screen') as THREE.Mesh;
+    const mat = screen.material as THREE.MeshStandardMaterial;
+    const original = mat.emissiveMap as THREE.Texture;
+    const disposeSpy = vi.spyOn(original, 'dispose');
+    const first = new THREE.Texture();
+    bb.setTexture(first);
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
+
+    const second = new THREE.Texture();
+    const firstDisposeSpy = vi.spyOn(first, 'dispose');
+    expect(() => bb.setTexture(second)).not.toThrow();
+    // `first` was caller-provided (via setTexture), so it must not be disposed.
+    expect(firstDisposeSpy).not.toHaveBeenCalled();
   });
 
   it('uses a provided texture instead of makeAd', () => {
