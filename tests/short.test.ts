@@ -136,9 +136,22 @@ describe('buildBar', () => {
   const group = buildBar(makeRng(5));
   contractChecks(group, 'bar', 8);
 
-  it('has ~5 seat anchors (4 stools + 1 standing table)', () => {
-    const seats = group.userData.seats as THREE.Object3D[];
-    expect(seats.length).toBe(5);
+  seatSanityChecks(group, 4, 'bar');
+
+  it('has standAnchors for the standing table, each a bare Object3D at ground height', () => {
+    const standAnchors = group.userData.standAnchors as THREE.Object3D[];
+    expect(Array.isArray(standAnchors)).toBe(true);
+    expect(standAnchors.length).toBeGreaterThanOrEqual(1);
+    for (const a of standAnchors) {
+      expect(a).toBeInstanceOf(THREE.Object3D);
+      expect((a as THREE.Mesh).isMesh).toBeFalsy();
+      expect(a.position.y).toBeCloseTo(0, 5);
+      let found = false;
+      group.traverse((o) => {
+        if (o === a) found = true;
+      });
+      expect(found).toBe(true);
+    }
   });
 
   it('tags the marquee mesh for flicker in userData.flicker', () => {

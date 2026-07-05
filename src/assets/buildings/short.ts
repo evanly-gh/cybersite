@@ -1148,6 +1148,7 @@ export function buildBar(rng: Rng): THREE.Group {
   const bodyParts: GeometryPart[] = [];
   const spillParts: GeometryPart[] = [];
   const seats: THREE.Object3D[] = [];
+  const standAnchors: THREE.Object3D[] = [];
 
   bodyParts.push(boxPart(new THREE.Vector3(0, h / 2, 0), new THREE.Vector3(w, h, d)));
   bodyParts.push(boxPart(new THREE.Vector3(0, h + 0.25, 0), new THREE.Vector3(w + 0.4, 0.5, d + 0.4)));
@@ -1244,10 +1245,10 @@ export function buildBar(rng: Rng): THREE.Group {
     mat: 0
   });
   const standAnchor = new THREE.Object3D();
-  standAnchor.name = 'seat';
+  standAnchor.name = 'standAnchor';
   standAnchor.position.set(tableX, 0.0, tableZ - 0.55);
   standAnchor.rotation.y = Math.PI;
-  seats.push(standAnchor);
+  standAnchors.push(standAnchor);
   group.add(standAnchor);
 
   group.add(mergeOne(bodyParts, makeBodyMat(), 'body'));
@@ -1259,6 +1260,7 @@ export function buildBar(rng: Rng): THREE.Group {
   group.userData.roofY = h;
   group.userData.footprint = [w, d];
   group.userData.seats = seats;
+  group.userData.standAnchors = standAnchors;
   group.userData.flicker = [marqueeMesh];
   return group;
 }
