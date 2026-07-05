@@ -19,6 +19,8 @@ const BUILDERS = {
 // Per-tier draw-call budgets: cheap ≤3–4, average ≤5.
 const BUDGET: Record<keyof typeof BUILDERS, number> = {
   hatchback: 3,
+  // kei van: 4 draw calls (3 cheap body materials + wheels) — controller-approved
+  // over the ≤3 cheap guideline; mismatched panel + roof rack justify the extra material
   keiVan: 4,
   sedan: 5,
   crossover: 5

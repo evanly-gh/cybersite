@@ -504,7 +504,7 @@ function avgDetails(
     plateY: number;
   }
 ): void {
-  const { W, frontX, rearX, beltY } = opts;
+  const { W, frontX, rearX, beltY, plateY } = opts;
   const D = AVG.dark;
 
   // door seams — thin dark vertical lines on both flanks
@@ -534,8 +534,8 @@ function avgDetails(
   });
 
   // lit license plates (front & rear) — white LED material, reads as a plate
-  parts.push(box(0.04, 0.14, 0.4, frontX + 0.02, 0.5, 0, AVG.head));
-  parts.push(box(0.04, 0.14, 0.4, rearX - 0.02, 0.55, 0, AVG.head));
+  parts.push(box(0.04, 0.14, 0.4, frontX + 0.02, plateY, 0, AVG.head));
+  parts.push(box(0.04, 0.14, 0.4, rearX - 0.02, plateY + 0.05, 0, AVG.head));
 
   // reddish instrument-cluster glow behind the windshield (bleeds through glass)
   parts.push(box(0.5, 0.06, W - 0.4, opts.windshieldX - 0.35, opts.windshieldY - 0.28, 0, AVG.tail));
@@ -577,7 +577,7 @@ export function buildSedan(rng: Rng): CarAsset {
     parts.push(box(0.06, 0.12, 0.42, 2.13, 0.72, z * 0.6, P.head));
   }
   parts.push(box(0.05, 0.14, W - 0.24, -2.13, 0.78, 0, P.tail)); // full-width tail bar
-  // amber turn-signal nubs (reuse tail material dimmed reads red; use head for corners)
+  // white LED corner marker nubs (reuses headlight material; not amber turn signals)
   for (const z of [1, -1]) parts.push(box(0.05, 0.08, 0.12, 2.13, 0.58, z * 0.86, P.head));
 
   // bumpers, mirrors (dark)
