@@ -384,7 +384,7 @@ export function buildApartment(rng: Rng, floors = 12): THREE.Group {
 /** Curtain-wall office window texture: tighter litRatio, strongly cool-biased. */
 function makeCurtainWallTexture(rng: Rng): THREE.CanvasTexture {
   return makeWindowTexture(rng, {
-    litRatio: rng.range(0.45, 0.6),
+    litRatio: rng.range(0.5, 0.65),
     coolRatio: 0.8,
     peakRatio: 0.05,
     dimLo: 0.2,
@@ -675,6 +675,12 @@ export function buildParking(rng: Rng, decks = 7): THREE.Group {
   const deckParts: GeometryPart[] = [];
   const amberParts: GeometryPart[] = [];
   const magentaParts: GeometryPart[] = [];
+  // Parked-car silhouettes get one of two body-color variants. `carColors[0]` matches
+  // makeBodyMat()'s color exactly, so those cars stay merged into `bodyParts` at zero
+  // extra draw-call cost; `carColors[1]` (shadowBlue) needs its own tinted material, so
+  // those cars route into `carAltParts` and get merged as one extra mesh (+1 draw call,
+  // keeping the parking build at 6 of the 6-call budget).
+  const carAltParts: GeometryPart[] = [];
 
   // Perimeter columns (grid: 4 along length, 2 along depth), full height.
   const colXs = [-w / 2 + 1, -w / 6, w / 6, w / 2 - 1];
@@ -725,11 +731,12 @@ export function buildParking(rng: Rng, decks = 7): THREE.Group {
         const carLen = rng.range(3.8, 4.4);
         const carH = rng.range(1.3, 1.5);
         const rot = rng.chance(0.5) ? 0 : Math.PI;
-        bodyParts.push(
+        const carColorIdx = rng.int(0, carColors.length - 1);
+        const carParts = carColorIdx === 0 ? bodyParts : carAltParts;
+        carParts.push(
           boxPart(new THREE.Vector3(cx, y + carH / 2 + 0.05, cz), new THREE.Vector3(carW, carH, carLen), 0),
           boxPart(new THREE.Vector3(cx, y + carH + 0.25, cz), new THREE.Vector3(carW * 0.75, carH * 0.4, carLen * 0.45))
         );
-        void carColors;
         // Dim amber tail lights at one end.
         const lightZ = cz + (rot === 0 ? -carLen / 2 : carLen / 2) * (rng.chance(0.5) ? 1 : -1);
         amberParts.push(
@@ -862,6 +869,15 @@ export function buildParking(rng: Rng, decks = 7): THREE.Group {
   deckTex.repeat.set(2, 1.3);
 
   group.add(mergeOne(bodyParts, makeBodyMat(), 'body'));
+  if (carAltParts.length > 0) {
+    group.add(
+      mergeOne(
+        carAltParts,
+        new THREE.MeshStandardMaterial({ color: carColors[1], roughness: 0.85, metalness: 0.15 }),
+        'carsAlt'
+      )
+    );
+  }
   group.add(
     mergeOne(
       deckParts,
