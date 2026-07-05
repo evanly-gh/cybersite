@@ -1,1 +1,2 @@
 # cybersite
+init

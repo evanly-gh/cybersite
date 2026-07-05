@@ -1,0 +1,637 @@
+import * as THREE from 'three';
+import { COLORS } from '../../theme';
+import type { Rng } from '../../utils/rng';
+import { mergeStatic, type GeometryPart } from '../../utils/merge';
+import { makeCanvasTexture } from '../../utils/canvasText';
+import { makeAd } from '../../content/adGenerator';
+
+/**
+ * Task 9 (part 1/2): the two tall Ring 0/1 city-fill towers.
+ *  - buildTallStepped: 3-tier setback megatower with railed setbacks, antenna crown,
+ *    blinking aviation beacons, and vertical magenta edge trim.
+ *  - buildTallSlab: 40x16m slab with a full-height magenta neon spine, a holo ticker
+ *    band at floor 30, and a mechanical penthouse + dish cluster.
+ *
+ * Shared facade machinery (window canvas texture + UV-scaled facade planes) lives here
+ * and is imported by special.ts (the monolith) — task 9 owns both files, no shared
+ * project file is touched.
+ *
+ * Draw-call budget: every category of parts is merged into ONE mesh with ONE material
+ * (see mergeOne), so a whole building is 4-6 draw calls total. Beacon meshes stay
+ * separate (they're animated by the city assembly's blink pass) but are themselves one
+ * merged mesh each.
+ */
+
+export const FLOOR_H = 3.2; // meters per floor (house rule)
+const WINDOW_PITCH_X = 3.0; // meters per window column
+
+// Window texture cell grid — the texture repeats, facade UVs are scaled so one cell
+// always covers WINDOW_PITCH_X x FLOOR_H meters and offset by whole cells per facade so
+// no two facades show the identical pattern.
+const TEX_COLS = 8;
+const TEX_ROWS = 16;
+const CELL_PX = 32;
+
+function hex(n: number): string {
+  return '#' + n.toString(16).padStart(6, '0');
+}
+
+export interface WindowTexOpts {
+  /** Fraction of windows lit (house rule: 0.5-0.7 for city fill; monolith uses 0.2). */
+  litRatio: number;
+  /** Of the lit windows, fraction that are cool (teal/moonlight) vs warm amber. */
+  coolRatio: number;
+  /** Of the lit windows, fraction drawn at full brightness (bloom-eligible peaks). */
+  peakRatio: number;
+  /** Alpha range for the non-peak lit windows (keeps most of the facade sub-bloom). */
+  dimLo: number;
+  dimHi: number;
+  /** Draw grime streaks bleeding down from window sills. */
+  dirt?: boolean;
+}
+
+/**
+ * Repeating night-facade texture: near-black body, per-cell rng lit/unlit windows in a
+ * warm(amber)/cool(teal-white) mix with a rare magenta tenant, most lit windows dim
+ * (alpha-scaled over black) and only `peakRatio` at full value so bloom picks out a few
+ * scattered hot dots instead of the whole facade.
+ */
+export function makeWindowTexture(rng: Rng, o: WindowTexOpts): THREE.CanvasTexture {
+  const w = TEX_COLS * CELL_PX;
+  const h = TEX_ROWS * CELL_PX;
+  const tex = makeCanvasTexture(w, h, (ctx) => {
+    ctx.fillStyle = hex(COLORS.void);
+    ctx.fillRect(0, 0, w, h);
+
+    for (let r = 0; r < TEX_ROWS; r++) {
+      for (let c = 0; c < TEX_COLS; c++) {
+        const x = c * CELL_PX;
+        // canvas y grows downward; row 0 at the bottom of the texture (v=0) is fine —
+        // the pattern is statistically uniform so orientation doesn't matter.
+        const y = r * CELL_PX;
+        const wx = x + CELL_PX * 0.18;
+        const wy = y + CELL_PX * 0.22;
+        const ww = CELL_PX * 0.64;
+        const wh = CELL_PX * 0.5;
+
+        if (!rng.chance(o.litRatio)) {
+          // Unlit glass: barely-there cold sheen so facades aren't featureless black.
+          ctx.globalAlpha = 0.5;
+          ctx.fillStyle = hex(COLORS.shadowBlue);
+          ctx.fillRect(wx, wy, ww, wh);
+          ctx.globalAlpha = 1;
+          continue;
+        }
+
+        const cool = rng.chance(o.coolRatio);
+        let color: number;
+        if (rng.chance(0.05)) color = COLORS.signalMagenta;
+        else if (cool) color = rng.chance(0.5) ? COLORS.holoTeal : COLORS.moonlight;
+        else color = COLORS.sodiumAmber;
+
+        const peak = rng.chance(o.peakRatio);
+        ctx.globalAlpha = peak ? 1 : rng.range(o.dimLo, o.dimHi);
+        ctx.fillStyle = hex(color);
+        ctx.fillRect(wx, wy, ww, wh);
+
+        // Occasional half-drawn blind: darken the top strip of a lit window.
+        if (rng.chance(0.25)) {
+          ctx.globalAlpha = 0.75;
+          ctx.fillStyle = hex(COLORS.void);
+          ctx.fillRect(wx, wy, ww, wh * rng.range(0.25, 0.55));
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    if (o.dirt) {
+      // Grime streaks bleeding down from sills — reads as weathering at facade scale.
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      const n = Math.round(TEX_COLS * TEX_ROWS * 0.1);
+      for (let i = 0; i < n; i++) {
+        const c = rng.int(0, TEX_COLS - 1);
+        const r = rng.int(0, TEX_ROWS - 1);
+        const sx = c * CELL_PX + CELL_PX * rng.range(0.2, 0.5);
+        const sy = r * CELL_PX + CELL_PX * 0.72;
+        ctx.fillRect(sx, sy, CELL_PX * rng.range(0.12, 0.3), CELL_PX * rng.range(0.8, 2.2));
+      }
+    }
+  });
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+// ---------------------------------------------------------------------------------
+// Part helpers
+// ---------------------------------------------------------------------------------
+
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+const unitBox = new THREE.BoxGeometry(1, 1, 1);
+
+/** Box part spanning `size` centered at `center` (optionally yaw-rotated). */
+export function boxPart(center: THREE.Vector3, size: THREE.Vector3, rotY = 0): GeometryPart {
+  const quat = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, rotY);
+  return { geom: unitBox, matrix: new THREE.Matrix4().compose(center, quat, size), mat: 0 };
+}
+
+/**
+ * Merge a same-material part list into ONE draw call (same trick as streets.ts:
+ * mergeStatic's per-part groups only split draw calls while material is an array).
+ */
+export function mergeOne(parts: GeometryPart[], material: THREE.Material, name: string): THREE.Mesh {
+  const mesh = mergeStatic(parts, [material]);
+  mesh.geometry.clearGroups();
+  mesh.material = material;
+  mesh.name = name;
+  return mesh;
+}
+
+/**
+ * One window-facade plane, UVs scaled so window cells stay WINDOW_PITCH_X x FLOOR_H
+ * meters regardless of facade size, and offset by rng whole cells so every facade shows
+ * a different slice of the repeating texture.
+ */
+export function facadePart(
+  rng: Rng,
+  width: number,
+  height: number,
+  center: THREE.Vector3,
+  rotY: number
+): GeometryPart {
+  const cols = Math.max(1, Math.round(width / WINDOW_PITCH_X));
+  const rows = Math.max(1, Math.round(height / FLOOR_H));
+  const geom = new THREE.PlaneGeometry(width, height);
+  const uv = geom.getAttribute('uv') as THREE.BufferAttribute;
+  const offU = rng.int(0, TEX_COLS - 1) / TEX_COLS;
+  const offV = rng.int(0, TEX_ROWS - 1) / TEX_ROWS;
+  for (let i = 0; i < uv.count; i++) {
+    uv.setXY(i, uv.getX(i) * (cols / TEX_COLS) + offU, uv.getY(i) * (rows / TEX_ROWS) + offV);
+  }
+  const quat = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, rotY);
+  return { geom, matrix: new THREE.Matrix4().compose(center, quat, new THREE.Vector3(1, 1, 1)), mat: 0 };
+}
+
+/** All four facade planes for a box tier sitting on `yBase` (small inset off each face). */
+export function addTierFacades(
+  parts: GeometryPart[],
+  rng: Rng,
+  w: number,
+  d: number,
+  h: number,
+  yBase: number,
+  gap = 0.04
+): void {
+  const yc = yBase + h / 2;
+  parts.push(
+    facadePart(rng, w, h, new THREE.Vector3(0, yc, d / 2 + gap), 0),
+    facadePart(rng, w, h, new THREE.Vector3(0, yc, -d / 2 - gap), Math.PI),
+    facadePart(rng, d, h, new THREE.Vector3(w / 2 + gap, yc, 0), Math.PI / 2),
+    facadePart(rng, d, h, new THREE.Vector3(-w / 2 - gap, yc, 0), -Math.PI / 2)
+  );
+}
+
+// Shared material factories (each building instantiates its own so textures differ).
+export function makeBodyMat(): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({ color: COLORS.towerBody, roughness: 0.85, metalness: 0.15 });
+}
+
+export function makeWindowMat(tex: THREE.Texture, intensity = 2.0): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color: COLORS.towerBody,
+    emissive: 0xffffff,
+    emissiveMap: tex,
+    emissiveIntensity: intensity,
+    roughness: 0.6,
+    metalness: 0.2
+  });
+}
+
+export function makeGlowMat(color: number, intensity: number): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color: COLORS.void,
+    emissive: color,
+    emissiveIntensity: intensity,
+    roughness: 0.9,
+    metalness: 0
+  });
+}
+
+/** Aviation beacons — sodium-amber per farField's Task 8 precedent (theme has no red). */
+export function makeBeaconMat(): THREE.MeshStandardMaterial {
+  return makeGlowMat(COLORS.sodiumAmber, 3);
+}
+
+// Railing rim (4 thin bars + posts) around a roof perimeter — used on setbacks.
+function addRailing(parts: GeometryPart[], w: number, d: number, y: number): void {
+  const railH = 1.1;
+  const t = 0.12;
+  const yc = y + railH - t / 2;
+  parts.push(
+    boxPart(new THREE.Vector3(0, yc, d / 2 - t / 2), new THREE.Vector3(w, t, t)),
+    boxPart(new THREE.Vector3(0, yc, -d / 2 + t / 2), new THREE.Vector3(w, t, t)),
+    boxPart(new THREE.Vector3(w / 2 - t / 2, yc, 0), new THREE.Vector3(t, t, d)),
+    boxPart(new THREE.Vector3(-w / 2 + t / 2, yc, 0), new THREE.Vector3(t, t, d))
+  );
+  // posts on the corners + midpoints
+  const posts: Array<[number, number]> = [
+    [w / 2 - t / 2, d / 2 - t / 2],
+    [-w / 2 + t / 2, d / 2 - t / 2],
+    [w / 2 - t / 2, -d / 2 + t / 2],
+    [-w / 2 + t / 2, -d / 2 + t / 2],
+    [0, d / 2 - t / 2],
+    [0, -d / 2 + t / 2],
+    [w / 2 - t / 2, 0],
+    [-w / 2 + t / 2, 0]
+  ];
+  for (const [px, pz] of posts) {
+    parts.push(boxPart(new THREE.Vector3(px, y + railH / 2, pz), new THREE.Vector3(t, railH, t)));
+  }
+}
+
+/** Cylindrical rooftop water tank on 4 legs w/ conical cap (classic megatower silhouette). */
+function addWaterTank(parts: GeometryPart[], x: number, z: number, y: number, r: number, rng: Rng): void {
+  const legH = 1.2;
+  const bodyH = r * 1.9;
+  const cyl = new THREE.CylinderGeometry(r, r, bodyH, 10);
+  parts.push({
+    geom: cyl,
+    matrix: new THREE.Matrix4().makeTranslation(x, y + legH + bodyH / 2, z),
+    mat: 0
+  });
+  const cap = new THREE.ConeGeometry(r * 1.05, r * 0.55, 10);
+  parts.push({
+    geom: cap,
+    matrix: new THREE.Matrix4().makeTranslation(x, y + legH + bodyH + r * 0.27, z),
+    mat: 0
+  });
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    parts.push(
+      boxPart(
+        new THREE.Vector3(x + Math.cos(a) * r * 0.7, y + legH / 2, z + Math.sin(a) * r * 0.7),
+        new THREE.Vector3(0.16, legH, 0.16)
+      )
+    );
+  }
+  void rng;
+}
+
+/** Scattered rooftop AC/mechanical boxes. */
+function addRoofBoxes(parts: GeometryPart[], rng: Rng, w: number, d: number, y: number, count: number): void {
+  for (let i = 0; i < count; i++) {
+    const bw = rng.range(1.2, 2.6);
+    const bd = rng.range(1.0, 2.2);
+    const bh = rng.range(0.8, 1.8);
+    const x = rng.range(-w / 2 + bw, w / 2 - bw);
+    const z = rng.range(-d / 2 + bd, d / 2 - bd);
+    parts.push(boxPart(new THREE.Vector3(x, y + bh / 2, z), new THREE.Vector3(bw, bh, bd), rng.range(0, Math.PI)));
+  }
+}
+
+/** Cell/whip antennas: mast + 2-3 panel boxes, placed on setback corners. */
+function addCellAntenna(parts: GeometryPart[], rng: Rng, x: number, z: number, y: number): void {
+  const h = rng.range(3, 5);
+  parts.push(boxPart(new THREE.Vector3(x, y + h / 2, z), new THREE.Vector3(0.14, h, 0.14)));
+  const panels = rng.int(2, 3);
+  for (let i = 0; i < panels; i++) {
+    const a = rng.range(0, Math.PI * 2);
+    parts.push(
+      boxPart(
+        new THREE.Vector3(x + Math.cos(a) * 0.35, y + h * rng.range(0.6, 0.9), z + Math.sin(a) * 0.35),
+        new THREE.Vector3(0.3, 1.1, 0.1),
+        -a + Math.PI / 2
+      )
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------------
+// (a) Stepped megatower
+// ---------------------------------------------------------------------------------
+
+/**
+ * 3-tier setback megatower. Tiers step 26x26 -> 20x20 -> 14x14 (rng-jittered), each
+ * setback gets a railing rim + rooftop clutter, crown is an 8m braced mast with a
+ * double aviation beacon (tagged `userData.beacons` for the city blink pass). Vertical
+ * magenta edge-trim strips run up two faces.
+ * ~5 draw calls: windows, body, magenta trim, dim amber accents, beacons.
+ */
+export function buildTallStepped(rng: Rng, floors = 34): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'tallStepped';
+
+  const totalH = floors * FLOOR_H;
+  const tierFloors = [Math.round(floors * 0.42), Math.round(floors * 0.32), 0];
+  tierFloors[2] = floors - tierFloors[0] - tierFloors[1];
+  const baseW = rng.range(24, 28);
+  const tierW = [baseW, baseW * 0.77, baseW * 0.55];
+  const tierD = tierW.map((w) => w * rng.range(0.94, 1.06));
+
+  const bodyParts: GeometryPart[] = [];
+  const windowParts: GeometryPart[] = [];
+  const trimParts: GeometryPart[] = [];
+  const amberParts: GeometryPart[] = [];
+
+  let y = 0;
+  const tierTops: number[] = [];
+  for (let i = 0; i < 3; i++) {
+    const h = tierFloors[i] * FLOOR_H;
+    const w = tierW[i];
+    const d = tierD[i];
+    bodyParts.push(boxPart(new THREE.Vector3(0, y + h / 2, 0), new THREE.Vector3(w, h, d)));
+    // Facades stop short of the parapet line so each tier reads a solid roof band.
+    addTierFacades(windowParts, rng, w - 0.4, d - 0.4, h - 1.2, y + 0.2, 0.24);
+    // Parapet lip on every tier roof.
+    bodyParts.push(boxPart(new THREE.Vector3(0, y + h + 0.25, 0), new THREE.Vector3(w + 0.5, 0.5, d + 0.5)));
+
+    // Vertical magenta edge trim on the +Z and +X faces (two strips each, hugging the
+    // face's vertical edges).
+    for (const side of [1, -1]) {
+      trimParts.push(
+        boxPart(new THREE.Vector3(side * (w / 2 - 0.5), y + h / 2, d / 2 + 0.12), new THREE.Vector3(0.18, h - 1, 0.18)),
+        boxPart(new THREE.Vector3(w / 2 + 0.12, y + h / 2, side * (d / 2 - 0.5)), new THREE.Vector3(0.18, h - 1, 0.18))
+      );
+    }
+
+    y += h;
+    tierTops.push(y);
+    if (i < 2) {
+      // Railing rim around the exposed setback roof.
+      addRailing(bodyParts, w - 0.3, d - 0.3, y + 0.5);
+    }
+  }
+
+  // Setback clutter: water tank + AC boxes on tier-1 roof, antennas on tier-2 roof.
+  const t1w = tierW[0];
+  const t1d = tierD[0];
+  const t2w = tierW[1];
+  addWaterTank(bodyParts, (t1w + tierW[1]) / 4 + 1, -(t1d - tierD[1]) / 4 - 1.4, tierTops[0] + 0.5, 1.5, rng);
+  addRoofBoxes(bodyParts, rng, t1w * 0.9, (t1d - tierD[1]) * 0.8, tierTops[0] + 0.5, 3);
+  addCellAntenna(bodyParts, rng, t2w / 2 + (tierW[0] * 0.77 - t2w) / 2 - 1, tierD[1] / 2 + 0.8, tierTops[1] + 0.5);
+  addCellAntenna(bodyParts, rng, -t2w / 2 - 0.8, -tierD[1] / 2 - 0.8, tierTops[1] + 0.5);
+  addRoofBoxes(bodyParts, rng, tierW[2] * 0.85, tierD[2] * 0.85, totalH, 2);
+
+  // Amber accents: dim lobby band at street level + mechanical warning strips.
+  amberParts.push(
+    boxPart(new THREE.Vector3(0, 2.4, tierD[0] / 2 + 0.1), new THREE.Vector3(tierW[0] * 0.7, 0.5, 0.15)),
+    boxPart(new THREE.Vector3(tierW[0] / 2 + 0.1, 2.4, 0), new THREE.Vector3(0.15, 0.5, tierD[0] * 0.7))
+  );
+  // Round-2 detail (SAW: setback roofs read as pure black voids — tank/AC invisible):
+  // a small amber mechanical lamp on the water tank cap + dim strips along each
+  // setback's +Z railing so the terrace lines register against the night.
+  amberParts.push(
+    boxPart(new THREE.Vector3((t1w + tierW[1]) / 4 + 1, tierTops[0] + 4.9, -(t1d - tierD[1]) / 4 - 1.4), new THREE.Vector3(0.32, 0.18, 0.32)),
+    boxPart(new THREE.Vector3(0, tierTops[0] + 1.55, tierD[0] / 2 - 0.35), new THREE.Vector3(tierW[0] * 0.55, 0.1, 0.1)),
+    boxPart(new THREE.Vector3(0, tierTops[1] + 1.55, tierD[1] / 2 - 0.35), new THREE.Vector3(tierW[1] * 0.55, 0.1, 0.1))
+  );
+
+  // Antenna crown: 8m mast + 3 cross-braces.
+  const mastH = 8;
+  bodyParts.push(boxPart(new THREE.Vector3(0, totalH + mastH / 2, 0), new THREE.Vector3(0.5, mastH, 0.5)));
+  for (let i = 0; i < 3; i++) {
+    const by = totalH + 2 + i * 2.1;
+    const bw = 2.6 - i * 0.6;
+    bodyParts.push(
+      boxPart(new THREE.Vector3(0, by, 0), new THREE.Vector3(bw, 0.14, 0.14)),
+      boxPart(new THREE.Vector3(0, by, 0), new THREE.Vector3(0.14, 0.14, bw))
+    );
+  }
+  // Round-2 detail (SAW: dark mast invisible at night — the double beacon floated
+  // disconnected above the roof): dim amber marker strips up two mast faces tie the
+  // beacons to the crown the way real towers' mast lighting does.
+  amberParts.push(
+    boxPart(new THREE.Vector3(0.3, totalH + mastH / 2, 0), new THREE.Vector3(0.09, mastH - 1.2, 0.09)),
+    boxPart(new THREE.Vector3(0, totalH + mastH / 2, 0.3), new THREE.Vector3(0.09, mastH - 1.2, 0.09))
+  );
+
+  // Round-3 detail (SAW: facades read as pure texture wallpaper — nothing breaks the
+  // window grid): dark drainage/service pipes proud of the facade cut black vertical
+  // interruptions through the lit windows, exactly what megatower references show.
+  for (let i = 0; i < 3; i++) {
+    const t = tierFloors[i] * FLOOR_H;
+    const base = i === 0 ? 0 : tierTops[i - 1];
+    const px = tierW[i] * rng.range(0.16, 0.34) * (i % 2 === 0 ? -1 : 1);
+    bodyParts.push(
+      boxPart(new THREE.Vector3(px, base + t / 2, tierD[i] / 2 + 0.32), new THREE.Vector3(0.28, t, 0.28)),
+      boxPart(new THREE.Vector3(-tierW[i] / 2 - 0.32, base + t / 2, px * 0.7), new THREE.Vector3(0.28, t, 0.28))
+    );
+  }
+  // Round-3 detail (SAW: tier-3 roofline vanishes against the sky between mast and
+  // trim): tiny amber safety lamps at the crown roof corners.
+  for (const sx of [1, -1]) {
+    for (const sz of [1, -1]) {
+      amberParts.push(
+        boxPart(
+          new THREE.Vector3(sx * (tierW[2] / 2 - 0.4), totalH + 0.62, sz * (tierD[2] / 2 - 0.4)),
+          new THREE.Vector3(0.22, 0.22, 0.22)
+        )
+      );
+    }
+  }
+
+  const windowTex = makeWindowTexture(rng, {
+    litRatio: rng.range(0.5, 0.65),
+    coolRatio: 0.45,
+    peakRatio: 0.07,
+    dimLo: 0.25,
+    dimHi: 0.55,
+    dirt: true
+  });
+
+  group.add(mergeOne(bodyParts, makeBodyMat(), 'body'));
+  group.add(mergeOne(windowParts, makeWindowMat(windowTex), 'windows'));
+  group.add(mergeOne(trimParts, makeGlowMat(COLORS.signalMagenta, 2.2), 'trim'));
+  group.add(mergeOne(amberParts, makeGlowMat(COLORS.sodiumAmber, 1.5), 'amber'));
+
+  // Double blinking beacon on the mast (one merged mesh; assembly animates it).
+  const beaconGeom = new THREE.SphereGeometry(0.35, 8, 6);
+  const beacons = mergeOne(
+    [
+      { geom: beaconGeom, matrix: new THREE.Matrix4().makeTranslation(0, totalH + mastH + 0.35, 0), mat: 0 },
+      { geom: beaconGeom, matrix: new THREE.Matrix4().makeTranslation(0, totalH + mastH - 1.8, 0), mat: 0 }
+    ],
+    makeBeaconMat(),
+    'beacons'
+  );
+  group.add(beacons);
+
+  group.userData.roofY = totalH;
+  group.userData.footprint = [tierW[0], tierD[0]];
+  group.userData.beacons = [beacons];
+  return group;
+}
+
+// ---------------------------------------------------------------------------------
+// (b) Slab tower
+// ---------------------------------------------------------------------------------
+
+/**
+ * 40x16m slab tower. Full-height 1.5m magenta neon spine up the +X narrow face ending
+ * in a rooftop neon sign frame; holo ticker band (strip ad from makeAd) wrapping the
+ * two long faces at floor 30; mechanical penthouse + dish cluster on the roof.
+ * ~5-6 draw calls: windows, body, magenta neon, ticker ad, amber accents, beacons.
+ */
+export function buildTallSlab(rng: Rng, floors = 40): THREE.Group {
+  const group = new THREE.Group();
+  group.name = 'tallSlab';
+
+  const totalH = floors * FLOOR_H;
+  const w = 40;
+  const d = 16;
+
+  const bodyParts: GeometryPart[] = [];
+  const windowParts: GeometryPart[] = [];
+  const neonParts: GeometryPart[] = [];
+  const amberParts: GeometryPart[] = [];
+  const tickerParts: GeometryPart[] = [];
+
+  bodyParts.push(boxPart(new THREE.Vector3(0, totalH / 2, 0), new THREE.Vector3(w, totalH, d)));
+  bodyParts.push(boxPart(new THREE.Vector3(0, totalH + 0.3, 0), new THREE.Vector3(w + 0.5, 0.6, d + 0.5)));
+  addTierFacades(windowParts, rng, w - 0.4, d - 0.4, totalH - 1.6, 0.2, 0.24);
+
+  // Neon spine: 1.5m emissive strip the full height of the +X narrow face.
+  neonParts.push(boxPart(new THREE.Vector3(w / 2 + 0.15, totalH / 2, 0), new THREE.Vector3(0.3, totalH, 1.5)));
+  // Round-2 detail (SAW: the spine reads as one featureless line): horizontal tick
+  // stubs branching off every ~8 floors give it circuitry rhythm.
+  for (let f = 6; f < floors - 2; f += 8) {
+    const side = f % 16 === 6 ? 1 : -1;
+    neonParts.push(
+      boxPart(new THREE.Vector3(w / 2 + 0.15, f * FLOOR_H, side * 1.9), new THREE.Vector3(0.22, 0.22, 2.4))
+    );
+  }
+
+  // Rooftop sign frame the spine runs into: 2 posts + header, neon-outlined rectangle.
+  const signW = 10; // along z
+  const signH = 5;
+  const signX = w / 2 - 1.2;
+  const signBaseY = totalH + 0.6;
+  bodyParts.push(
+    boxPart(new THREE.Vector3(signX, signBaseY + 4, signW / 2 - 0.2), new THREE.Vector3(0.4, 8, 0.4)),
+    boxPart(new THREE.Vector3(signX, signBaseY + 4, -signW / 2 + 0.2), new THREE.Vector3(0.4, 8, 0.4)),
+    boxPart(new THREE.Vector3(signX, signBaseY + 8, 0), new THREE.Vector3(0.35, 0.35, signW))
+  );
+  const signCy = signBaseY + 5.2;
+  neonParts.push(
+    boxPart(new THREE.Vector3(signX + 0.25, signCy + signH / 2, 0), new THREE.Vector3(0.16, 0.16, signW)),
+    boxPart(new THREE.Vector3(signX + 0.25, signCy - signH / 2, 0), new THREE.Vector3(0.16, 0.16, signW)),
+    boxPart(new THREE.Vector3(signX + 0.25, signCy, signW / 2), new THREE.Vector3(0.16, signH, 0.16)),
+    boxPart(new THREE.Vector3(signX + 0.25, signCy, -signW / 2), new THREE.Vector3(0.16, signH, 0.16))
+  );
+
+  // Holo ticker band at floor 30, on both long faces.
+  // (Round-2: was 32x4 @1.4 — read as a dim unreadable smear; enlarged + brightened.)
+  const tickerY = 30 * FLOOR_H;
+  const tickerW = 36;
+  const tickerH = 4.5;
+  const tickerGeomF = new THREE.PlaneGeometry(tickerW, tickerH);
+  tickerParts.push(
+    { geom: tickerGeomF, matrix: new THREE.Matrix4().makeTranslation(0, tickerY, d / 2 + 0.3), mat: 0 },
+    {
+      geom: tickerGeomF,
+      matrix: new THREE.Matrix4()
+        .makeRotationY(Math.PI)
+        .setPosition(0, tickerY, -d / 2 - 0.3),
+      mat: 0
+    }
+  );
+  // Ticker mount rails top+bottom.
+  for (const side of [1, -1]) {
+    bodyParts.push(
+      boxPart(new THREE.Vector3(0, tickerY + tickerH / 2 + 0.2, side * (d / 2 + 0.2)), new THREE.Vector3(tickerW + 1, 0.25, 0.3)),
+      boxPart(new THREE.Vector3(0, tickerY - tickerH / 2 - 0.2, side * (d / 2 + 0.2)), new THREE.Vector3(tickerW + 1, 0.25, 0.3))
+    );
+  }
+
+  // Mechanical penthouse + dish cluster.
+  const phW = 10;
+  const phD = 7;
+  const phH = 4;
+  const phX = -w / 2 + phW / 2 + 2;
+  bodyParts.push(boxPart(new THREE.Vector3(phX, totalH + phH / 2, 0), new THREE.Vector3(phW, phH, phD)));
+  const dishGeom = new THREE.SphereGeometry(1.3, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2.6);
+  for (let i = 0; i < 3; i++) {
+    const dx = phX + rng.range(-2.5, 2.5);
+    const dz = rng.range(-phD / 2 + 1, phD / 2 - 1);
+    const m = new THREE.Matrix4()
+      .makeRotationFromEuler(new THREE.Euler(Math.PI / 2 + rng.range(-0.5, 0.2), rng.range(0, Math.PI * 2), 0))
+      .setPosition(dx, totalH + phH + 0.9, dz);
+    bodyParts.push({ geom: dishGeom, matrix: m, mat: 0 });
+    bodyParts.push(boxPart(new THREE.Vector3(dx, totalH + phH / 2 + 1, dz), new THREE.Vector3(0.2, phH + 2, 0.2)));
+  }
+  addRoofBoxes(bodyParts, rng, w * 0.5, d * 0.7, totalH + 0.6, 4);
+  // Round-3 detail (SAW: the roofline between penthouse and sign frame is a bare
+  // ledge): guard railing around the full roof perimeter.
+  addRailing(bodyParts, w - 0.6, d - 0.6, totalH + 0.6);
+  // Round-3 detail (SAW: the long facades are unbroken window wallpaper): dark
+  // drainage/service pipes proud of both long faces cut through the lit grid.
+  for (const [px, side] of [
+    [-w * 0.31, 1],
+    [w * 0.18, 1],
+    [-w * 0.12, -1],
+    [w * 0.33, -1]
+  ] as Array<[number, number]>) {
+    bodyParts.push(boxPart(new THREE.Vector3(px, totalH / 2, side * (d / 2 + 0.32)), new THREE.Vector3(0.28, totalH - 1, 0.28)));
+  }
+
+  // Amber: penthouse door glow + lobby band.
+  amberParts.push(
+    boxPart(new THREE.Vector3(phX + phW / 2 + 0.06, totalH + 1.2, 0), new THREE.Vector3(0.1, 2.2, 1.4)),
+    boxPart(new THREE.Vector3(0, 2.6, d / 2 + 0.1), new THREE.Vector3(w * 0.5, 0.4, 0.15))
+  );
+  // Round-2 detail (SAW: penthouse + dishes and the sign posts vanish into the night —
+  // the neon sign rectangle floated unsupported): dim amber warning strips along the
+  // penthouse roof edge and small lamps atop the sign posts anchor them.
+  amberParts.push(
+    boxPart(new THREE.Vector3(phX, totalH + phH + 0.06, phD / 2 - 0.15), new THREE.Vector3(phW * 0.85, 0.12, 0.12)),
+    boxPart(new THREE.Vector3(phX, totalH + phH + 0.06, -phD / 2 + 0.15), new THREE.Vector3(phW * 0.85, 0.12, 0.12)),
+    boxPart(new THREE.Vector3(signX, signBaseY + 7.9, 0), new THREE.Vector3(0.12, 0.12, signW * 0.96))
+  );
+
+  const windowTex = makeWindowTexture(rng, {
+    litRatio: rng.range(0.55, 0.7),
+    coolRatio: 0.55,
+    peakRatio: 0.06,
+    dimLo: 0.25,
+    dimHi: 0.55,
+    dirt: true
+  });
+  const adTex = makeAd('strip', rng);
+
+  group.add(mergeOne(bodyParts, makeBodyMat(), 'body'));
+  group.add(mergeOne(windowParts, makeWindowMat(windowTex), 'windows'));
+  group.add(mergeOne(neonParts, makeGlowMat(COLORS.signalMagenta, 2.5), 'neon'));
+  group.add(mergeOne(amberParts, makeGlowMat(COLORS.sodiumAmber, 1.5), 'amber'));
+  group.add(
+    mergeOne(
+      tickerParts,
+      new THREE.MeshStandardMaterial({
+        color: 0x000000,
+        emissive: 0xffffff,
+        emissiveMap: adTex,
+        emissiveIntensity: 2.0,
+        roughness: 0.9
+      }),
+      'ticker'
+    )
+  );
+
+  // Beacons on the sign-frame posts.
+  const beaconGeom = new THREE.SphereGeometry(0.3, 8, 6);
+  const beacons = mergeOne(
+    [
+      { geom: beaconGeom, matrix: new THREE.Matrix4().makeTranslation(signX, signBaseY + 8.4, signW / 2 - 0.2), mat: 0 },
+      { geom: beaconGeom, matrix: new THREE.Matrix4().makeTranslation(signX, signBaseY + 8.4, -signW / 2 + 0.2), mat: 0 }
+    ],
+    makeBeaconMat(),
+    'beacons'
+  );
+  group.add(beacons);
+
+  group.userData.roofY = totalH;
+  group.userData.footprint = [w, d];
+  group.userData.beacons = [beacons];
+  return group;
+}
