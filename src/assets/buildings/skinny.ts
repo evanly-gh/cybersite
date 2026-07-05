@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { COLORS } from '../../theme';
 import type { Rng } from '../../utils/rng';
 import type { GeometryPart } from '../../utils/merge';
-import { boxPart, mergeOne, makeGlowMat } from './tall';
+import { boxPart, mergeOne, makeGlowMat, makeBeaconMat } from './tall';
 import { makeCanvasTexture, drawPanel } from '../../utils/canvasText';
 import { buildSatelliteDish } from './rooftop';
 
@@ -245,7 +245,9 @@ export function buildRadioMast(rng: Rng): THREE.Group {
     mat: 0
   });
 
-  const redMat = makeGlowMat(0xff2b2b, 3.2);
+  // Aviation beacons use the codebase's documented beacon convention (sodium-amber, per
+  // tall.ts's makeBeaconMat / farField's Task 8 precedent — theme has no red); the top
+  // strobe reuses the theme's moonlight white rather than a raw hex literal.
   const beaconGeom = new THREE.SphereGeometry(0.32, 8, 6);
   const midY = MAST_H * 0.5;
   const beacons = mergeOne(
@@ -253,13 +255,13 @@ export function buildRadioMast(rng: Rng): THREE.Group {
       { geom: beaconGeom, matrix: new THREE.Matrix4().makeTranslation(legPos(0, midY).x, midY, legPos(0, midY).z), mat: 0 },
       { geom: beaconGeom, matrix: new THREE.Matrix4().makeTranslation(legPos(1, midY).x, midY, legPos(1, midY).z), mat: 0 }
     ],
-    redMat,
+    makeBeaconMat(),
     'beacons'
   );
   const strobeGeom = new THREE.SphereGeometry(0.4, 8, 6);
   const strobe = mergeOne(
     [{ geom: strobeGeom, matrix: new THREE.Matrix4().makeTranslation(0, topPlatformY + 0.45, 0), mat: 0 }],
-    makeGlowMat(0xffffff, 4),
+    makeGlowMat(COLORS.moonlight, 4),
     'strobe'
   );
 
@@ -270,7 +272,9 @@ export function buildRadioMast(rng: Rng): THREE.Group {
   group.add(strobe);
 
   group.userData.roofY = MAST_H;
-  group.userData.footprint = [LEG_R_BASE * 2, LEG_R_BASE * 2];
+  // Footprint must reflect the mast's real ground extent for city layout spacing — the
+  // guy-wire anchors reach out to `anchorDist` on all 3 sides, well past the lattice legs.
+  group.userData.footprint = [anchorDist * 2, anchorDist * 2];
   group.userData.beacons = [beacons, strobe];
   return group;
 }
@@ -312,13 +316,25 @@ export function buildMonument(rng: Rng): THREE.Group {
   const plaqueParts: GeometryPart[] = [];
   const trimParts: GeometryPart[] = [];
 
+  // --- rng-driven variety (round-3 fix: monuments were all identical since `rng` was
+  // unused). Plinth proportions, the figure's stride/pose, and the up-light color all
+  // vary per-instance while keeping the tested footprint/roofY contracts fixed (plinthW/
+  // plinthD stay 8x8, MONUMENT_H stays 22).
+  const strideAmp = rng.range(0.85, 1.2); // how pronounced the stride/lean reads
+  const rearLegAngle = rng.range(0.1, 0.26);
+  const frontLegAngle = rng.range(-0.4, -0.24);
+  const torsoLean = rng.range(-0.22, -0.1);
+  const armSwing = rng.range(0.4, 0.62);
+  const headTilt = rng.range(-0.16, -0.05);
+  const uplightColor = rng.chance(0.5) ? COLORS.sodiumAmber : COLORS.holoTeal;
+
   // --- Stone plinth: 2-tier base.
   const plinthW = 8;
   const plinthD = 8;
   const plinthH = 3;
   bodyParts.push(boxPart(new THREE.Vector3(0, plinthH / 2, 0), new THREE.Vector3(plinthW, plinthH, plinthD)));
   const plinth2W = plinthW * 0.72;
-  const plinth2H = 1.6;
+  const plinth2H = rng.range(1.3, 1.9);
   bodyParts.push(
     boxPart(new THREE.Vector3(0, plinthH + plinth2H / 2, 0), new THREE.Vector3(plinth2W, plinth2H, plinth2W))
   );
@@ -334,31 +350,39 @@ export function buildMonument(rng: Rng): THREE.Group {
 
   // Rear leg (planted, slight backward lean).
   bodyParts.push(
-    boxPart(new THREE.Vector3(-0.6, y0 + legH / 2, -0.9), new THREE.Vector3(0.9, legH, 0.7), 0.18)
+    boxPart(
+      new THREE.Vector3(-0.6 * strideAmp, y0 + legH / 2, -0.9 * strideAmp),
+      new THREE.Vector3(0.9, legH, 0.7),
+      rearLegAngle
+    )
   );
   // Front leg (striding forward, more forward lean + wider stance).
   bodyParts.push(
-    boxPart(new THREE.Vector3(0.9, y0 + legH * 0.46, 1.1), new THREE.Vector3(0.85, legH * 0.95, 0.7), -0.32)
+    boxPart(
+      new THREE.Vector3(0.9 * strideAmp, y0 + legH * 0.46, 1.1 * strideAmp),
+      new THREE.Vector3(0.85, legH * 0.95, 0.7),
+      frontLegAngle
+    )
   );
 
   // Torso — leans forward into the stride, offset toward the front leg.
   const torsoY = y0 + legH * 0.85 + torsoH / 2;
   bodyParts.push(
-    boxPart(new THREE.Vector3(0.25, torsoY, 0.15), new THREE.Vector3(1.6, torsoH, 1.1), -0.16)
+    boxPart(new THREE.Vector3(0.25, torsoY, 0.15), new THREE.Vector3(1.6, torsoH, 1.1), torsoLean)
   );
   // Chest plate accent (slightly rotated for an angular "armor" read).
   bodyParts.push(
-    boxPart(new THREE.Vector3(0.35, torsoY + torsoH * 0.15, 0.55), new THREE.Vector3(1.1, torsoH * 0.5, 0.3), -0.1)
+    boxPart(new THREE.Vector3(0.35, torsoY + torsoH * 0.15, 0.55), new THREE.Vector3(1.1, torsoH * 0.5, 0.3), torsoLean * 0.6)
   );
 
   // Arms — one swung back, one forward, both angular slabs.
   const armY = torsoY + torsoH * 0.18;
-  bodyParts.push(boxPart(new THREE.Vector3(-1.1, armY, -0.5), new THREE.Vector3(0.4, torsoH * 0.8, 0.4), 0.5));
-  bodyParts.push(boxPart(new THREE.Vector3(1.15, armY - torsoH * 0.1, 0.9), new THREE.Vector3(0.4, torsoH * 0.65, 0.4), -0.6));
+  bodyParts.push(boxPart(new THREE.Vector3(-1.1, armY, -0.5), new THREE.Vector3(0.4, torsoH * 0.8, 0.4), armSwing));
+  bodyParts.push(boxPart(new THREE.Vector3(1.15, armY - torsoH * 0.1, 0.9), new THREE.Vector3(0.4, torsoH * 0.65, 0.4), -armSwing * 1.2));
 
   // Head — small angular block atop the torso, tilted up as if striding into the wind.
   const headY = torsoY + torsoH / 2 + headH / 2 + 0.1;
-  bodyParts.push(boxPart(new THREE.Vector3(0.3, headY, 0.25), new THREE.Vector3(0.7, headH, 0.7), -0.1));
+  bodyParts.push(boxPart(new THREE.Vector3(0.3, headY, 0.25), new THREE.Vector3(0.7, headH, 0.7), headTilt));
 
   // Round-2 detail (SAW: the stacked-box figure is a featureless silhouette with no
   // sense of its angular joints): thin teal seam lights trace the torso/chest and
@@ -423,7 +447,7 @@ export function buildMonument(rng: Rng): THREE.Group {
   haloHolder.add(halo);
 
   group.add(mergeOne(bodyParts, new THREE.MeshStandardMaterial({ color: 0x4a463e, roughness: 0.9, metalness: 0.08 }), 'body'));
-  group.add(mergeOne(amberParts, makeGlowMat(COLORS.sodiumAmber, 2.4), 'uplights'));
+  group.add(mergeOne(amberParts, makeGlowMat(uplightColor, 2.4), 'uplights'));
   group.add(mergeOne(trimParts, makeGlowMat(COLORS.holoTeal, 2.0), 'trim'));
   group.add(
     mergeOne(
@@ -443,6 +467,5 @@ export function buildMonument(rng: Rng): THREE.Group {
   group.userData.roofY = MONUMENT_H;
   group.userData.footprint = [plinthW, plinthD];
   group.userData.halo = halo;
-  void rng;
   return group;
 }

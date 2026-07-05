@@ -112,9 +112,56 @@ describe('decorateRoof', () => {
     });
   }
 
-  it('keeps a tight draw-call budget (<=3) regardless of item count', () => {
+  it('keeps a tight draw-call budget (<=2 merged buckets + one mesh per vent fan)', () => {
     const group = decorateRoof({ y: 0, w: 40, d: 24 }, makeRng(2));
-    expect(countDrawCalls(group)).toBeLessThanOrEqual(3);
+    const fans = group.userData.fans as THREE.Mesh[];
+    expect(Array.isArray(fans)).toBe(true);
+    // body + glow are always-merged buckets (parapet rail / puddle sheen guarantee both
+    // are non-empty), so total draw calls = 2 merged buckets + one small mesh per fan.
+    expect(countDrawCalls(group)).toBe(2 + fans.length);
+  });
+
+  it('spins each fan around its own hub, not the roof origin', () => {
+    // Use a handful of seeds to find one that actually packs a vent unit (fans are only
+    // present when the rng picks a 'vent' item).
+    let group: THREE.Group | undefined;
+    let fans: THREE.Mesh[] = [];
+    for (let seed = 0; seed < 30; seed++) {
+      const g = decorateRoof({ y: 0, w: 40, d: 24 }, makeRng(seed));
+      const f = g.userData.fans as THREE.Mesh[];
+      if (f.length > 0) {
+        group = g;
+        fans = f;
+        break;
+      }
+    }
+    expect(group).toBeDefined();
+    expect(fans.length).toBeGreaterThan(0);
+
+    for (const fan of fans) {
+      // Each fan mesh must be its own (non-merged) mesh, not baked into a shared buffer.
+      expect(fan.isMesh).toBe(true);
+
+      // The fan's geometry must be centered on the mesh's own local origin (not baked
+      // with a translation into vertex positions) — otherwise rotating it around its own
+      // Y axis would orbit it around the hub instead of spinning in place. (The 5-sided
+      // CylinderGeometry's bounding box isn't perfectly symmetric about its axis, so we
+      // allow a small tolerance rather than requiring an exact zero.)
+      fan.geometry.computeBoundingBox();
+      const localCenter = new THREE.Vector3();
+      fan.geometry.boundingBox!.getCenter(localCenter);
+      expect(localCenter.length()).toBeLessThan(0.1);
+
+      // The mesh's own position (its rotation pivot) should sit at its vent's hub, i.e.
+      // away from the roof origin for an off-center vent — confirming the fan doesn't
+      // spin around (0,0,0) like the pre-fix merged mesh did.
+      const before = fan.position.clone();
+      fan.rotation.y = 1.7;
+      fan.updateMatrixWorld(true);
+      const worldPos = new THREE.Vector3();
+      fan.getWorldPosition(worldPos);
+      expect(worldPos.distanceTo(before)).toBeLessThan(1e-6);
+    }
   });
 
   it('reserves the center slot when opts.billboard is set', () => {

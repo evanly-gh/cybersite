@@ -8,11 +8,15 @@ import { boxPart, mergeOne, makeBodyMat, makeGlowMat } from './tall';
  * Task 12 (part 1/2): the shared rooftop clutter kit + `decorateRoof` packer.
  *
  * `decorateRoof` is called for EVERY Ring 0/1 building in the city (the ≥80%
- * non-flat-roof house rule lives here), so its output budget is tight: the whole
- * returned group is at most 3 merged meshes (body/glow/fan) regardless of how many
- * items get packed, by routing every part through one of three shared part buckets and
- * merging once per bucket. Fan discs are the one animated exception — they're their own
- * tiny merged mesh so the city assembly can spin them (`userData.fans`).
+ * non-flat-roof house rule lives here), so its output budget is tight: body and glow
+ * clutter always route through two shared, merged buckets (≤2 draw calls) regardless of
+ * how many items get packed. Fan discs are the one exception: `mergeStatic` bakes each
+ * part's offset into vertex positions, which would leave a merged fan mesh's *transform*
+ * at the roof origin — spinning it would orbit every fan around the roof center instead
+ * of its own hub. So fan discs are kept as individual small `THREE.Mesh`es (geometry
+ * centered at the mesh's own local origin, `mesh.position` set to the vent's hub), one
+ * per vent unit (typically 0-2 per roof) — a small extra draw-call cost in exchange for
+ * correct per-fan spin (`userData.fans`).
  *
  * Everything here is built in ROOF-LOCAL space: origin at the roof's own center,
  * resting on y=0 (callers translate the returned group to `(x, roof.y, z)`).
@@ -78,8 +82,18 @@ export function buildSatelliteDish(
   }
 }
 
+/** A fan disc that must stay its own mesh (see `decorateRoof`'s fan-handling note) so it
+ * can spin around its own hub rather than the roof origin. `geom` is centered at the
+ * mesh's own local origin (not baked with a translation); `hub` is where that origin
+ * belongs in roof-local space. */
+export interface FanDisc {
+  geom: THREE.BufferGeometry;
+  hub: THREE.Vector3;
+}
+
 /**
- * Vent/AC unit box with a spinning fan disc on top (fan mesh returned for tagging).
+ * Vent/AC unit box with a spinning fan disc on top (fan disc descriptor returned so the
+ * caller can build its own un-merged, correctly-pivoted mesh).
  * Round-2 detail: a small status LED on the housing face reads as a lit mechanical
  * unit rather than a dark block.
  */
@@ -92,7 +106,7 @@ export function buildVentUnit(
   w: number,
   d: number,
   h: number
-): GeometryPart {
+): FanDisc {
   bodyParts.push(boxPart(new THREE.Vector3(x, y + h / 2, z), new THREE.Vector3(w, h, d)));
   // fan housing rim
   const r = Math.min(w, d) * 0.38;
@@ -104,8 +118,10 @@ export function buildVentUnit(
   glowParts.push(
     boxPart(new THREE.Vector3(x + w / 2 - 0.06, y + h * 0.35, z), new THREE.Vector3(0.05, 0.08, 0.08))
   );
+  // Fan geometry stays centered at its own local origin (no baked matrix) so a mesh built
+  // from it can spin in place; `hub` tells the caller where to place that mesh's pivot.
   const fanGeom = new THREE.CylinderGeometry(r, r, 0.06, 5);
-  return { geom: fanGeom, matrix: new THREE.Matrix4().makeTranslation(x, y + h + h * 0.1, z), mat: 0 };
+  return { geom: fanGeom, hub: new THREE.Vector3(x, y + h + h * 0.1, z) };
 }
 
 /**
@@ -335,7 +351,7 @@ export function decorateRoof(roof: RoofSpec, rng: Rng, opts: DecorateRoofOpts = 
 
   const bodyParts: GeometryPart[] = [];
   const glowParts: GeometryPart[] = [];
-  const fanParts: GeometryPart[] = [];
+  const fanDiscs: FanDisc[] = [];
 
   const slotHalfW = cellW / 2 - 0.15;
   const slotHalfD = cellD / 2 - 0.15;
@@ -353,7 +369,7 @@ export function decorateRoof(roof: RoofSpec, rng: Rng, opts: DecorateRoofOpts = 
         const w = Math.min(slotHalfW * 1.6, rng.range(1.0, 1.8));
         const d = Math.min(slotHalfD * 1.6, rng.range(1.0, 1.8));
         const fan = buildVentUnit(bodyParts, glowParts, x, z, 0, w, d, rng.range(0.7, 1.3));
-        fanParts.push(fan);
+        fanDiscs.push(fan);
         break;
       }
       case 'pipe': {
@@ -447,13 +463,23 @@ export function decorateRoof(roof: RoofSpec, rng: Rng, opts: DecorateRoofOpts = 
 
   if (bodyParts.length > 0) group.add(mergeOne(bodyParts, makeBodyMat(), 'clutterBody'));
   if (glowParts.length > 0) group.add(mergeOne(glowParts, makeGlowMat(COLORS.holoTeal, 1.4), 'clutterGlow'));
-  let fans: THREE.Mesh | undefined;
-  if (fanParts.length > 0) {
-    fans = mergeOne(fanParts, makeGlowMat(COLORS.shadowBlue, 0.2), 'fans');
-    group.add(fans);
-  }
+
+  // Fan discs stay individual meshes (NOT merged) — see the file-header note and
+  // `FanDisc` doc: mergeStatic bakes each part's offset into vertex positions, so a
+  // merged fan mesh's transform would sit at the roof origin and spinning it would orbit
+  // every fan around the roof center instead of spinning in place on its own hub. Each
+  // disc's geometry is centered at its own local origin, so `mesh.position = hub` gives
+  // it the correct pivot and `mesh.rotation.y` spins it in place.
+  const fanMat = makeGlowMat(COLORS.shadowBlue, 0.2);
+  const fans: THREE.Mesh[] = fanDiscs.map((fan, i) => {
+    const mesh = new THREE.Mesh(fan.geom, fanMat);
+    mesh.position.copy(fan.hub);
+    mesh.name = `fan${i}`;
+    group.add(mesh);
+    return mesh;
+  });
 
   group.userData.footprint = [roof.w, roof.d];
-  group.userData.fans = fans ? [fans] : [];
+  group.userData.fans = fans;
   return group;
 }
