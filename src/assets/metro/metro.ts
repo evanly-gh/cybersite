@@ -119,6 +119,89 @@ function wrap01(x: number): number {
 }
 
 // ---------------------------------------------------------------------------------
+// Draw-call budget: region-scoped track geometry
+// ---------------------------------------------------------------------------------
+// The girder core/deck/run-lights/cable-tray were originally single meshes built from a
+// TubeGeometry over the FULL closed loop, and the rib/pylon InstancedMeshes held every
+// placement city-wide — so each one's bounding sphere spanned the whole ~2000m loop and
+// three.js's default frustum culling could never drop it, a flat "+19 draws at every
+// viewpoint" cost documented in task-20-report.md. Fixed the same way cityLayout.ts
+// region-chunks filler buildings: classify the path into contiguous RUNS by which
+// camera-route region (About / Shibuya / boulevard / skyway) each arc-length sample
+// falls in, then build one (smaller) tube/InstancedMesh PER RUN instead of one spanning
+// the whole loop. A run's mesh only ever needs to draw when its own short stretch of
+// track is actually in view.
+type MetroRegion = 'about' | 'shibuya' | 'boulevard' | 'skyway';
+
+// Kept in lockstep with cityLayout.ts's zone/route thresholds by comment, not import
+// (metro.ts must not import cityLayout.ts — cityLayout.ts imports buildMetro from here).
+const REGION_ABOUT_X1 = 210; // About street stops short of the Shibuya plaza (see cityLayout ABOUT_X1)
+const REGION_BLVD_Z1 = -420; // boulevard/skyway seam (see cityLayout BLVD_Z1)
+
+function metroRegionAt(x: number, z: number): MetroRegion {
+  if (z < REGION_BLVD_Z1) return 'skyway'; // skyway/bridge approach + the distant far return leg
+  if (x < REGION_ABOUT_X1 - 20) return 'about'; // About corridor (with a small pre-plaza buffer)
+  if (z > -60) return 'shibuya'; // the plaza crossing itself + the sweep in/out of it
+  return 'boulevard'; // the projects boulevard run south of the plaza
+}
+
+interface MetroRun {
+  region: MetroRegion;
+  u0: number;
+  u1: number;
+}
+
+/** Walks the closed loop at fine resolution and splits it into contiguous arc-length
+ * runs wherever `metroRegionAt` changes — NOT one run per region name (the loop revisits
+ * some regions more than once, e.g. the About corridor at both the start and the
+ * west-return leg near the end), so each run stays spatially local and gets a tight
+ * bounding sphere once built. */
+function computeMetroRuns(): MetroRun[] {
+  const N = 1440;
+  const p = new THREE.Vector3();
+  const runs: MetroRun[] = [];
+  let prevRegion: MetroRegion | null = null;
+  let runStart = 0;
+  for (let i = 0; i <= N; i++) {
+    const u = (i % N) / N;
+    METRO_PATH.getPointAt(u, p);
+    const region = metroRegionAt(p.x, p.z);
+    if (prevRegion === null) {
+      prevRegion = region;
+      continue;
+    }
+    if (region !== prevRegion) {
+      runs.push({ region: prevRegion, u0: runStart, u1: i / N });
+      prevRegion = region;
+      runStart = i / N;
+    }
+  }
+  runs.push({ region: prevRegion ?? 'about', u0: runStart, u1: 1 });
+  return runs;
+}
+
+function findRunIndex(runs: MetroRun[], u: number): number {
+  for (let i = 0; i < runs.length; i++) {
+    if (u >= runs[i].u0 && u < runs[i].u1) return i;
+  }
+  return runs.length - 1;
+}
+
+/** Small padding (in u) added to each run's sampled range so adjacent runs' tube
+ * geometry overlaps a hair rather than leaving a visible seam at the boundary. */
+function runURange(run: MetroRun, pad: number): [number, number] {
+  return [Math.max(0, run.u0 - pad), Math.min(1, run.u1 + pad)];
+}
+
+function sampleAlong(u0: number, u1: number, n: number, fn: (u: number) => THREE.Vector3): THREE.Vector3[] {
+  const pts: THREE.Vector3[] = [];
+  for (let i = 0; i <= n; i++) {
+    pts.push(fn(u0 + (u1 - u0) * (i / n)));
+  }
+  return pts;
+}
+
+// ---------------------------------------------------------------------------------
 // Canvas textures
 // ---------------------------------------------------------------------------------
 
@@ -307,35 +390,36 @@ function mergeOne(parts: GeometryPart[], mat: THREE.Material, name: string): THR
   return mesh;
 }
 
-// Offset tube (running lights / cable tray) built by sweeping an offset of the metro path.
-function buildOffsetTube(
+// Offset tube (running lights / cable tray) built by sweeping an offset of the metro
+// path, restricted to one region RUN (not the whole closed loop) so its bounding sphere
+// stays local to that run — see the "Draw-call budget" comment block above.
+function buildOffsetTubeForRun(
+  run: MetroRun,
+  runIdx: number,
   side: number,
   down: number,
   outAmount: number,
   radius: number,
   mat: THREE.Material,
-  name: string
+  namePrefix: string
 ): THREE.Mesh {
-  const N = 400;
-  const pts: THREE.Vector3[] = [];
+  const [u0, u1] = runURange(run, 0.004);
+  const N = Math.max(8, Math.round(400 * (u1 - u0)));
   const frame: PathFrame = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
-  for (let i = 0; i < N; i++) {
-    const u = i / N;
+  const pts = sampleAlong(u0, u1, N, (u) => {
     pathFrameAt(u, frame);
     // In pathFrameAt's basis, local +Z is 'right' and local +Y is 'up'.
     const right = new THREE.Vector3(0, 0, 1).applyQuaternion(frame.quat);
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(frame.quat);
-    pts.push(
-      frame.pos
-        .clone()
-        .addScaledVector(right, side * outAmount)
-        .addScaledVector(up, -down)
-    );
-  }
-  const curve = new THREE.CatmullRomCurve3(pts, true, 'centripetal');
-  const geom = new THREE.TubeGeometry(curve, N, radius, 4, true);
+    return frame.pos
+      .clone()
+      .addScaledVector(right, side * outAmount)
+      .addScaledVector(up, -down);
+  });
+  const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+  const geom = new THREE.TubeGeometry(curve, N, radius, 4, false);
   const mesh = new THREE.Mesh(geom, mat);
-  mesh.name = name;
+  mesh.name = `${namePrefix}:${run.region}${runIdx}`;
   return mesh;
 }
 
@@ -348,69 +432,80 @@ function buildTrack(rng: Rng): THREE.Group {
   group.name = 'metroTrack';
 
   const structMat = darkStructureMat();
-
-  // Backbone: TubeGeometry with radial=4 -> a boxy girder core.
-  const core = new THREE.Mesh(
-    new THREE.TubeGeometry(METRO_PATH, 700, GIRDER_CORE_R, 4, true),
-    structMat
-  );
-  core.rotation.set(0, 0, 0);
-  core.name = 'girderCore';
-  group.add(core);
-
-  // Cross-section frames (box-girder ribs) via InstancedMesh along the path.
   const pathLen = METRO_PATH.getLength();
+
+  // Region-chunked runs (see the "Draw-call budget" comment block above `wrap01`): every
+  // continuous piece of track geometry below is built PER RUN instead of once over the
+  // whole closed loop, so each run's mesh/InstancedMesh gets a tight local bounding
+  // sphere and culls when the camera is looking at a different part of the route.
+  const runs = computeMetroRuns();
+  const runMat = glowMat(COLORS.holoTeal, 3.4);
+
+  runs.forEach((run, i) => {
+    const [u0, u1] = runURange(run, 0.004);
+    const uSpan = u1 - u0;
+
+    // Backbone: TubeGeometry with radial=4 -> a boxy girder core, restricted to this run.
+    const coreN = Math.max(8, Math.round(700 * uSpan));
+    const corePts = sampleAlong(u0, u1, coreN, (u) => METRO_PATH.getPointAt(u, new THREE.Vector3()));
+    const coreCurve = new THREE.CatmullRomCurve3(corePts, false, 'centripetal');
+    const core = new THREE.Mesh(new THREE.TubeGeometry(coreCurve, coreN, GIRDER_CORE_R, 4, false), structMat);
+    core.name = `girderCore:${run.region}${i}`;
+    group.add(core);
+
+    // Continuous flat deck box on top of the ribs (reads as the box-girder top plate).
+    const deckN = Math.max(8, Math.round(500 * uSpan));
+    const deckPts = sampleAlong(u0, u1, deckN, (u) => {
+      const p = METRO_PATH.getPointAt(u, new THREE.Vector3());
+      return new THREE.Vector3(p.x, p.y + GIRDER_TOP + 0.12, p.z);
+    });
+    const deckCurve = new THREE.CatmullRomCurve3(deckPts, false, 'centripetal');
+    const deck = new THREE.Mesh(new THREE.TubeGeometry(deckCurve, deckN, 0.12, 4, false), structMat);
+    deck.name = `girderDeck:${run.region}${i}`;
+    group.add(deck);
+
+    // Teal edge running-lights: two thin emissive tubes hugging the girder's lower edges.
+    group.add(buildOffsetTubeForRun(run, i, +1, RUN_LIGHT_DOWN, RUN_LIGHT_OUT, 0.09, runMat, 'runLightR'));
+    group.add(buildOffsetTubeForRun(run, i, -1, RUN_LIGHT_DOWN, RUN_LIGHT_OUT, 0.09, runMat, 'runLightL'));
+
+    // Cable tray (iteration detail): a dark conduit slung under the girder underside.
+    group.add(
+      buildOffsetTubeForRun(run, i, +1, RIB_HALF_H + 0.35, RIB_HALF_W * 0.55, 0.16, structMat, 'cableTray')
+    );
+  });
+
+  // Cross-section frames (box-girder ribs): one InstancedMesh PER RUN (not one spanning
+  // the whole loop) so distant ribs cull with the rest of their run's geometry.
   const ribSpacing = 3.2;
   const nRibs = Math.floor(pathLen / ribSpacing);
   const ribGeom = new THREE.BoxGeometry(0.28, RIB_HALF_H * 2 + 0.35, RIB_HALF_W * 2 + 0.3);
-  const ribs = new THREE.InstancedMesh(ribGeom, structMat, nRibs);
-  ribs.name = 'girderRibs';
   const frame: PathFrame = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
-  const mtx = new THREE.Matrix4();
   const scl = new THREE.Vector3(1, 1, 1);
+  const ribMatsByRun: THREE.Matrix4[][] = runs.map(() => []);
   for (let i = 0; i < nRibs; i++) {
-    pathFrameAt(i / nRibs, frame);
-    mtx.compose(frame.pos, frame.quat, scl);
-    ribs.setMatrixAt(i, mtx);
+    const u = i / nRibs;
+    pathFrameAt(u, frame);
+    const runIdx = findRunIndex(runs, u);
+    ribMatsByRun[runIdx].push(new THREE.Matrix4().compose(frame.pos.clone(), frame.quat.clone(), scl));
   }
-  ribs.instanceMatrix.needsUpdate = true;
-  group.add(ribs);
-
-  // Continuous flat deck box on top of the ribs (reads as the box-girder top plate).
-  const deck = new THREE.Mesh(
-    new THREE.TubeGeometry(offsetPathY(GIRDER_TOP + 0.12), 500, 0.12, 4, true),
-    structMat
-  );
-  deck.name = 'girderDeck';
-  group.add(deck);
-
-  // Teal edge running-lights: two thin emissive tubes hugging the girder's lower edges.
-  const runMat = glowMat(COLORS.holoTeal, 3.4);
-  group.add(buildOffsetTube(+1, RUN_LIGHT_DOWN, RUN_LIGHT_OUT, 0.09, runMat, 'runLightR'));
-  group.add(buildOffsetTube(-1, RUN_LIGHT_DOWN, RUN_LIGHT_OUT, 0.09, runMat, 'runLightL'));
-
-  // Cable tray (iteration detail): a dark conduit slung under the girder underside.
-  group.add(
-    buildOffsetTube(+1, RIB_HALF_H + 0.35, RIB_HALF_W * 0.55, 0.16, structMat, 'cableTray')
-  );
+  runs.forEach((run, i) => {
+    const mats = ribMatsByRun[i];
+    if (mats.length === 0) return;
+    const ribs = new THREE.InstancedMesh(ribGeom, structMat, mats.length);
+    ribs.name = `girderRibs:${run.region}${i}`;
+    mats.forEach((m, j) => ribs.setMatrixAt(j, m));
+    ribs.instanceMatrix.needsUpdate = true;
+    ribs.computeBoundingSphere();
+    group.add(ribs);
+  });
 
   // T-pylons every PYLON_SPACING metres down to the ground (skips the distant far leg
-  // where the loop is behind everything and off any street — see buildPylons).
+  // where the loop is behind everything and off any street — see buildPylons), grouped
+  // per REGION (About / Shibuya / boulevard / skyway) rather than one flat set spanning
+  // the whole loop.
   buildPylons(group, rng, pathLen);
 
   return group;
-}
-
-/** A curve offset a constant amount in world-Y from the metro path (for the deck plate). */
-function offsetPathY(dy: number): THREE.CatmullRomCurve3 {
-  const N = 300;
-  const pts: THREE.Vector3[] = [];
-  const p = new THREE.Vector3();
-  for (let i = 0; i < N; i++) {
-    METRO_PATH.getPointAt(i / N, p);
-    pts.push(new THREE.Vector3(p.x, p.y + dy, p.z));
-  }
-  return new THREE.CatmullRomCurve3(pts, true, 'centripetal');
 }
 
 interface PylonPlan {

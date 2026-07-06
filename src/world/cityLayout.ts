@@ -108,6 +108,32 @@ export interface PropSlot {
   x: number;
   z: number;
   rotY: number;
+  zone: Zone;
+}
+
+/** Coarse camera-route regions (About corridor / Shibuya / boulevard / skyway-bridge),
+ * ~hundreds of metres apart along the L-shaped route. Every Zone maps to exactly one of
+ * these. Used ONLY at mesh-assembly time (buildCity) to split each instanced KIND into
+ * one InstancedMesh per region it has placements in, instead of one global InstancedMesh
+ * spanning the whole city — see the region-chunked instancing comment on buildCity. */
+export type Region = 'about' | 'shibuya' | 'boulevard' | 'skyway';
+
+export function regionOfZone(zone: Zone): Region {
+  switch (zone) {
+    case 'aboutWall':
+    case 'aboutBack':
+      return 'about';
+    case 'shibuya':
+      return 'shibuya';
+    case 'projectsWall':
+    case 'projectsBack':
+    case 'boulevard':
+      return 'boulevard';
+    case 'skywayFlank':
+      return 'skyway';
+    default:
+      return 'about';
+  }
 }
 
 export interface CrowdSlot {
@@ -515,12 +541,19 @@ export function computeCityLayout(seed: number): CityLayoutData {
   }
 
   // --- traffic lights at Shibuya, steam vents, vending, hydrants, trash ---
+  // Region-chunked instancing (see buildCity) needs a zone tag per prop so its instanced
+  // group can be split per region; these spots are either at Shibuya or straddle the
+  // About/boulevard corridors, so a simple x-distance-to-boulevard-centreline threshold
+  // is enough to bucket each one correctly (props don't need a precise Zone, only the
+  // Region it maps to).
+  const zoneOfPropPoint = (x: number): Zone => (Math.abs(x - BLVD_X) < 60 ? 'boulevard' : 'aboutWall');
+
   [
     [cx + 12, 12],
     [cx + 12, -12],
     [cx - 12, 12],
     [cx - 12, -12]
-  ].forEach(([x, z], i) => props.push({ kind: 'trafficLight', x, z, rotY: (i * Math.PI) / 2 }));
+  ].forEach(([x, z], i) => props.push({ kind: 'trafficLight', x, z, rotY: (i * Math.PI) / 2, zone: 'shibuya' }));
 
   const ventSpots: Array<[number, number]> = [
     [ABOUT_X0 + 60, -SIDEWALK_SETBACK + 1],
@@ -530,7 +563,9 @@ export function computeCityLayout(seed: number): CityLayoutData {
     [BLVD_X - SIDEWALK_SETBACK + 1, -300],
     [BLVD_X + SIDEWALK_SETBACK - 1, -400]
   ];
-  ventSpots.forEach(([x, z], i) => props.push({ kind: 'steamVent', x, z, rotY: (i * Math.PI) / 3 }));
+  ventSpots.forEach(([x, z], i) =>
+    props.push({ kind: 'steamVent', x, z, rotY: (i * Math.PI) / 3, zone: zoneOfPropPoint(x) })
+  );
 
   // Draw-call budget pass: only 2 prop kinds total (steamVent above + hydrant here) —
   // vendingMachine/trashHeap positions kept for sidewalk clutter density but built as
@@ -543,7 +578,7 @@ export function computeCityLayout(seed: number): CityLayoutData {
     [aboutMid + 100, SIDEWALK_SETBACK - 1],
     [BLVD_X + SIDEWALK_SETBACK - 1, -260]
   ];
-  clutterSpots.forEach(([x, z]) => props.push({ kind: 'hydrant', x, z, rotY: 0 }));
+  clutterSpots.forEach(([x, z]) => props.push({ kind: 'hydrant', x, z, rotY: 0, zone: zoneOfPropPoint(x) }));
 
   // --- life: crowds, walkers, dogs ---
   crowds.push(
@@ -760,29 +795,48 @@ export function buildCity(seed: number): City {
   const updateAmbientFns: Array<(sec: number) => void> = [];
   const updateFns: Array<(t: number) => void> = [];
 
-  // --- filler buildings: ONE template per kind, instanced GLOBALLY across every zone's
-  // placements (not per-zone) — draw-call cost is fixed at "6 kinds x ~8 meshes" no
-  // matter how many lots the city has or which viewpoint the camera sits at. (An earlier
-  // per-zone-instanced version measured 800+ draw calls at some viewpoints because the
-  // city's L-shaped route means far-away zones can still fall inside a narrow, far-reaching
-  // camera frustum — global instancing sidesteps that entirely instead of relying on
-  // per-zone frustum culling that this camera geometry defeats.)
-  const fillerByKind = new Map<FillerKind, BuildingSlot[]>();
+  // --- filler buildings: ONE template per kind (shared geometry/material, built once),
+  // instanced PER REGION (About / Shibuya / boulevard / skyway — see `Region`/
+  // `regionOfZone`) rather than one InstancedMesh spanning the whole city. Each region's
+  // placements sit hundreds of metres from the others along the L-shaped route, so each
+  // per-region InstancedMesh gets a LOCAL bounding sphere (computed from just that
+  // region's instance matrices) and three.js's default frustum culling can drop whole
+  // regions the camera isn't looking at — unlike a single global InstancedMesh, whose
+  // bounding sphere would span every placement city-wide and therefore never cull.
+  // Draw-call cost per viewpoint is now "kinds x regions visible" instead of a flat
+  // "kinds x regions total" paid everywhere. (An earlier per-zone-instanced version of
+  // this same idea, tried before global instancing, measured 800+ draw calls at some
+  // viewpoints — that version scoped instances to the fine-grained Zone union, some of
+  // which are still large/thin enough for the L-route's frustum to catch several at once;
+  // scoping to the coarser 4-region bucket instead keeps each group's bounds tight to a
+  // segment the route camera is never near more than one of at a time.)
+  const fillerByKindRegion = new Map<string, { kind: FillerKind; region: Region; slots: BuildingSlot[] }>();
   for (const b of layout.buildings) {
     if (!b.isFiller) continue;
     const kind = b.kind as FillerKind;
-    if (!fillerByKind.has(kind)) fillerByKind.set(kind, []);
-    fillerByKind.get(kind)!.push(b);
+    const region = regionOfZone(b.zone);
+    const key = `${kind}:${region}`;
+    if (!fillerByKindRegion.has(key)) fillerByKindRegion.set(key, { kind, region, slots: [] });
+    fillerByKindRegion.get(key)!.slots.push(b);
   }
+  const fillerTemplates = new Map<FillerKind, THREE.Group>();
   let templateSalt = 0;
-  for (const [kind, slots] of fillerByKind) {
-    const rng = makeRng(seed + CITY_SEED_SALT.filler + templateSalt++);
-    const template = buildFillerTemplate(kind, rng, false);
+  function getFillerTemplate(kind: FillerKind): THREE.Group {
+    let t = fillerTemplates.get(kind);
+    if (!t) {
+      const rng = makeRng(seed + CITY_SEED_SALT.filler + templateSalt++);
+      t = buildFillerTemplate(kind, rng, false);
+      fillerTemplates.set(kind, t);
+    }
+    return t;
+  }
+  for (const { kind, region, slots } of fillerByKindRegion.values()) {
+    const template = getFillerTemplate(kind);
     const instanced = instanceTemplate(
       template,
       slots.map((s) => ({ x: s.x, z: s.z, rotY: s.rotY }))
     );
-    instanced.name = `filler:${kind}`;
+    instanced.name = `filler:${kind}:${region}`;
     group.add(instanced);
     const spinFans = instanced.userData.spinFans as ((sec: number) => void) | undefined;
     if (spinFans) updateAmbientFns.push(spinFans);
@@ -867,42 +921,66 @@ export function buildCity(seed: number): City {
     group.add(built.group);
     updateAmbientFns.push(built.updateAmbient);
   }
-  // Grouped by (format, mount) ONLY — global across every zone, same reasoning as the
-  // filler buildings above: a handful of ad templates, replicated everywhere, for a
-  // draw-call cost that never grows with the repeat count.
-  const repeatsByGroup = new Map<string, BillboardSlot[]>();
+  // Grouped by (format, mount, region) — one shared template per (format, mount), but a
+  // separate InstancedMesh per region so distant repeats cull the same way filler
+  // buildings do (see the filler comment above for the full reasoning).
+  const repeatsByGroupRegion = new Map<
+    string,
+    { format: AdFormat; mount: BillboardMount; region: Region; slots: BillboardSlot[] }
+  >();
   for (const bb of layout.billboards.filter((b) => !b.unique)) {
-    const key = `${bb.format}:${bb.mount}`;
-    if (!repeatsByGroup.has(key)) repeatsByGroup.set(key, []);
-    repeatsByGroup.get(key)!.push(bb);
+    const region = regionOfZone(bb.zone);
+    const key = `${bb.format}:${bb.mount}:${region}`;
+    if (!repeatsByGroupRegion.has(key)) {
+      repeatsByGroupRegion.set(key, { format: bb.format, mount: bb.mount, region, slots: [] });
+    }
+    repeatsByGroupRegion.get(key)!.slots.push(bb);
   }
+  const billboardTemplates = new Map<string, THREE.Group>();
   let bbTemplateSalt = 0;
-  for (const [key, slots] of repeatsByGroup) {
-    const [format, mount] = key.split(':');
-    const rng = makeRng(seed + CITY_SEED_SALT.billboardRepeat + bbTemplateSalt++);
-    const built = buildBillboard(rng, { format: format as AdFormat, mount: mount as BillboardMount });
-    built.group.updateMatrixWorld(true);
+  function getBillboardTemplate(format: AdFormat, mount: BillboardMount): THREE.Group {
+    const tKey = `${format}:${mount}`;
+    let t = billboardTemplates.get(tKey);
+    if (!t) {
+      const rng = makeRng(seed + CITY_SEED_SALT.billboardRepeat + bbTemplateSalt++);
+      const built = buildBillboard(rng, { format, mount });
+      built.group.updateMatrixWorld(true);
+      t = built.group;
+      billboardTemplates.set(tKey, t);
+    }
+    return t;
+  }
+  for (const { format, mount, region, slots } of repeatsByGroupRegion.values()) {
+    const template = getBillboardTemplate(format, mount);
     const instanced = instanceTemplate(
-      built.group,
+      template,
       slots.map((s) => ({ x: s.x, z: s.z, rotY: s.rotY, y: s.y }))
     );
-    instanced.name = `billboardRepeat:${key}`;
+    instanced.name = `billboardRepeat:${format}:${mount}:${region}`;
     group.add(instanced);
   }
 
-  // --- lamps: ONE global instanced template covering every lamp post in the city ---
+  // --- lamps: one instanced template per region covering that region's lamp posts ---
   {
     const rng = makeRng(seed + CITY_SEED_SALT.lamp);
     const template = buildStreetLamp(rng);
-    const instanced = instanceTemplate(
-      template,
-      layout.lamps.map((s) => ({ x: s.x, z: s.z, rotY: s.rotY }))
-    );
-    instanced.name = 'lamps';
-    group.add(instanced);
+    const lampsByRegion = new Map<Region, LampSlot[]>();
+    for (const s of layout.lamps) {
+      const region = regionOfZone(s.zone);
+      if (!lampsByRegion.has(region)) lampsByRegion.set(region, []);
+      lampsByRegion.get(region)!.push(s);
+    }
+    for (const [region, slots] of lampsByRegion) {
+      const instanced = instanceTemplate(
+        template,
+        slots.map((s) => ({ x: s.x, z: s.z, rotY: s.rotY }))
+      );
+      instanced.name = `lamps:${region}`;
+      group.add(instanced);
+    }
   }
 
-  // --- props: traffic lights individually (few), rest instanced per kind ---
+  // --- props: traffic lights individually (few), rest instanced per (kind, region) ---
   const propsByKind = new Map<string, PropSlot[]>();
   for (const p of layout.props) {
     if (!propsByKind.has(p.kind)) propsByKind.set(p.kind, []);
@@ -930,12 +1008,20 @@ export function buildCity(seed: number): City {
     }
     const rng = makeRng(seed + CITY_SEED_SALT.prop + propSalt++);
     const template = PROP_BUILDERS[kind as PropSlot['kind']](rng);
-    const instanced = instanceTemplate(
-      template,
-      slots.map((s) => ({ x: s.x, z: s.z, rotY: s.rotY }))
-    );
-    instanced.name = `props:${kind}`;
-    group.add(instanced);
+    const slotsByRegion = new Map<Region, PropSlot[]>();
+    for (const p of slots) {
+      const region = regionOfZone(p.zone);
+      if (!slotsByRegion.has(region)) slotsByRegion.set(region, []);
+      slotsByRegion.get(region)!.push(p);
+    }
+    for (const [region, regionSlots] of slotsByRegion) {
+      const instanced = instanceTemplate(
+        template,
+        regionSlots.map((s) => ({ x: s.x, z: s.z, rotY: s.rotY }))
+      );
+      instanced.name = `props:${kind}:${region}`;
+      group.add(instanced);
+    }
   }
 
   // --- powerlines ---
