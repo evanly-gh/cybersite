@@ -126,4 +126,70 @@ describe('buildCity (mesh assembly)', () => {
     expect(() => city.update(0.5)).not.toThrow();
     expect(() => city.updateAmbient(2)).not.toThrow();
   });
+
+  it('update(t) is not inert: it drives the metro train transform', async () => {
+    const { buildCity } = await import('../src/world/cityLayout');
+    const city = buildCity(1337);
+    let metro: THREE.Object3D | undefined;
+    city.group.traverse((o) => {
+      if (o.name === 'metro') metro = o;
+    });
+    expect(metro).toBeDefined();
+
+    function snapshotMeshWorldMatrices(): number[] {
+      metro!.updateMatrixWorld(true);
+      const sig: number[] = [];
+      metro!.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) sig.push(...o.matrixWorld.elements);
+      });
+      return sig;
+    }
+
+    city.update(0);
+    const sig0 = snapshotMeshWorldMatrices();
+    city.update(0.5);
+    const sig1 = snapshotMeshWorldMatrices();
+
+    expect(sig0.length).toBeGreaterThan(0);
+    expect(sig1).not.toEqual(sig0);
+  });
+
+  it('updateAmbient(sec) spins rooftop fan instances', async () => {
+    const { buildCity } = await import('../src/world/cityLayout');
+    const city = buildCity(1337);
+    let fillerGroup: THREE.Object3D | undefined;
+    city.group.traverse((o) => {
+      if (!fillerGroup && o.name.startsWith('filler:') && (o.userData as { spinFans?: unknown }).spinFans) {
+        fillerGroup = o;
+      }
+    });
+    expect(fillerGroup).toBeDefined();
+
+    let fanInst: THREE.InstancedMesh | undefined;
+    fillerGroup!.traverse((o) => {
+      if (!fanInst && (o as THREE.InstancedMesh).isInstancedMesh) fanInst = o as THREE.InstancedMesh;
+    });
+    // Locate the specific fan InstancedMesh among this filler group's instanced meshes —
+    // fall back to comparing ALL of them since only the fan one should change.
+    const insts: THREE.InstancedMesh[] = [];
+    fillerGroup!.traverse((o) => {
+      if ((o as THREE.InstancedMesh).isInstancedMesh) insts.push(o as THREE.InstancedMesh);
+    });
+    expect(insts.length).toBeGreaterThan(0);
+
+    const before = insts.map((inst) => {
+      const m = new THREE.Matrix4();
+      inst.getMatrixAt(0, m);
+      return m.elements.slice();
+    });
+    city.updateAmbient(2);
+    const after = insts.map((inst) => {
+      const m = new THREE.Matrix4();
+      inst.getMatrixAt(0, m);
+      return m.elements.slice();
+    });
+
+    const anyChanged = before.some((b, i) => !b.every((v, j) => v === after[i][j]));
+    expect(anyChanged).toBe(true);
+  });
 });

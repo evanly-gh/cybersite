@@ -12,6 +12,7 @@ import type { AdFormat } from '../content/adGenerator';
 import { buildPerson, buildCrowd } from '../assets/characters/person';
 import { buildDog } from '../assets/characters/dog';
 import { buildCrane } from '../assets/props/crane';
+import { buildMetro } from '../assets/metro/metro';
 import { buildGasStation } from '../assets/props/gasStation';
 import { buildPowerRun } from '../assets/props/powerlines';
 import {
@@ -369,28 +370,41 @@ export function computeCityLayout(seed: number): CityLayoutData {
   }
 
   // --- filler walls ---
-  // Only 3 distinct FillerKinds are used at all (storefrontRow/apartment/officeHolo —
-  // tallStepped, tallSlab and parking all dropped) — draw-call budget pass: each kind
-  // costs one fixed-size globally-instanced template regardless of placement count, so
-  // fewer distinct kinds directly shrinks the "always drawn" baseline every viewpoint
-  // pays (measured empirically: dropping tallSlab alone was worth ~17 real draw calls
-  // at every single viewpoint, once the per-person culling fix — see `enableCulling` —
-  // took care of the much bigger population-driven overage).
+  // Front-wall zones (aboutWall/projectsWall) stay storefrontRow/apartment/officeHolo
+  // ONLY — those need clean, low, flat-adjacent faces as Phase-5 content anchors, so no
+  // added height variety there. Back zones (aboutBack/projectsBack/skywayFlank) sit
+  // across the street from the anchors and never host content, so they're where the
+  // skyline gets its height variety: tallStepped/tallSlab/parking are folded into their
+  // weight tables below. Each added kind is still one globally-instanced template (see
+  // instanceTemplate) — cheap regardless of placement count — but IS a new "always
+  // drawn where visible" line item, so weights are kept modest and the draw-call budget
+  // is re-audited after (Step 6 of the brief) rather than assumed safe.
   const aboutWallWeights: Array<[FillerKind, number]> = [
     ['storefrontRow', 0.4],
     ['apartment', 0.3],
     ['officeHolo', 0.3]
   ];
   const aboutBackWeights: Array<[FillerKind, number]> = [
-    ['storefrontRow', 0.4],
-    ['apartment', 0.6]
+    ['storefrontRow', 0.3],
+    ['apartment', 0.4],
+    ['tallStepped', 0.12],
+    ['tallSlab', 0.12],
+    ['parking', 0.06]
   ];
   const projectsWallWeights: Array<[FillerKind, number]> = [['officeHolo', 1]];
   const projectsBackWeights: Array<[FillerKind, number]> = [
-    ['apartment', 0.5],
-    ['storefrontRow', 0.5]
+    ['apartment', 0.35],
+    ['storefrontRow', 0.35],
+    ['tallStepped', 0.12],
+    ['tallSlab', 0.12],
+    ['parking', 0.06]
   ];
-  const skywayWeights: Array<[FillerKind, number]> = [['officeHolo', 1]];
+  const skywayWeights: Array<[FillerKind, number]> = [
+    ['officeHolo', 0.6],
+    ['tallStepped', 0.16],
+    ['tallSlab', 0.16],
+    ['parking', 0.08]
+  ];
 
   fillWall(rng, 'x', ABOUT_X0, ABOUT_X1, -SIDEWALK_SETBACK, -1, 'aboutWall', aboutWallWeights, reserved, { blocks, buildings }, 'aboutWall');
   fillWall(rng, 'x', ABOUT_X0, ABOUT_X1, SIDEWALK_SETBACK, 1, 'aboutBack', aboutBackWeights, reserved, { blocks, buildings }, 'aboutBack');
@@ -643,8 +657,14 @@ function buildFillerTemplate(kind: FillerKind, rng: Rng, withRoofBillboard: bool
   const roof = decorateRoof({ y: 0, w: footprint[0], d: footprint[1] }, rng, { billboard: withRoofBillboard });
   roof.position.set(0, roofY, 0);
   group.add(roof);
+  // Propagate the roof's individual fan-disc meshes up so instanceTemplate (which
+  // traverses `group`, not `roof`, for its mesh list) can identify which of the
+  // template's meshes need per-instance spin animation.
+  if (roof.userData.fans) group.userData.fans = roof.userData.fans;
   return group;
 }
+
+const FAN_SPIN_SPEED = 2.4; // rad/sec // TUNE
 
 /** Replicates every Mesh in `template` (in its own local/world space, with the template
  * group left at the identity transform) across `placements` as one InstancedMesh per
@@ -664,6 +684,16 @@ function instanceTemplate(
     if ((o as THREE.Mesh).isMesh && !(o as THREE.SkinnedMesh).isSkinnedMesh) meshes.push(o as THREE.Mesh);
   });
 
+  // Fan-disc meshes (see rooftop.ts / buildFillerTemplate) are kept as individual small
+  // meshes specifically so they can spin around their own local Y — even after being
+  // folded into a global InstancedMesh here, each instance's baked matrix already has
+  // the fan's own hub as its local origin, so re-applying a Y-rotation on the RIGHT of
+  // that baked matrix (innermost, closest to the geometry) spins each instance in place
+  // around its own hub rather than around the world/building origin. Buildings only
+  // ever yaw around Y too, so the fan's local Y always coincides with world Y.
+  const fanSet = new Set<THREE.Mesh>((template.userData.fans as THREE.Mesh[] | undefined) ?? []);
+  const spinFns: Array<(sec: number) => void> = [];
+
   const q = new THREE.Quaternion();
   const upAxis = new THREE.Vector3(0, 1, 0);
   const placementMatrix = new THREE.Matrix4();
@@ -672,15 +702,37 @@ function instanceTemplate(
   for (const mesh of meshes) {
     const inst = new THREE.InstancedMesh(mesh.geometry, mesh.material, placements.length);
     inst.name = mesh.name || 'filler';
+    const isFan = fanSet.has(mesh);
+    const baseMatrices: THREE.Matrix4[] | undefined = isFan ? [] : undefined;
     placements.forEach((p, i) => {
       q.setFromAxisAngle(upAxis, p.rotY);
       placementMatrix.compose(new THREE.Vector3(p.x, p.y ?? 0, p.z), q, new THREE.Vector3(1, 1, 1));
       finalMatrix.multiplyMatrices(placementMatrix, mesh.matrixWorld);
+      baseMatrices?.push(finalMatrix.clone());
       inst.setMatrixAt(i, finalMatrix);
     });
     inst.instanceMatrix.needsUpdate = true;
     inst.computeBoundingSphere();
     out.add(inst);
+
+    if (isFan && baseMatrices) {
+      const spinMatrix = new THREE.Matrix4();
+      const spun = new THREE.Matrix4();
+      spinFns.push((sec: number) => {
+        spinMatrix.makeRotationY(sec * FAN_SPIN_SPEED);
+        baseMatrices.forEach((base, i) => {
+          spun.multiplyMatrices(base, spinMatrix);
+          inst.setMatrixAt(i, spun);
+        });
+        inst.instanceMatrix.needsUpdate = true;
+      });
+    }
+  }
+
+  if (spinFns.length > 0) {
+    out.userData.spinFans = (sec: number) => {
+      for (const fn of spinFns) fn(sec);
+    };
   }
   return out;
 }
@@ -696,7 +748,8 @@ const CITY_SEED_SALT = {
   powerline: 11000,
   gasStation: 12000,
   crane: 13000,
-  billboardHero: 14000
+  billboardHero: 14000,
+  metro: 15000
 };
 
 export function buildCity(seed: number): City {
@@ -731,6 +784,8 @@ export function buildCity(seed: number): City {
     );
     instanced.name = `filler:${kind}`;
     group.add(instanced);
+    const spinFans = instanced.userData.spinFans as ((sec: number) => void) | undefined;
+    if (spinFans) updateAmbientFns.push(spinFans);
   }
 
   // --- landmark + venue buildings: built individually, real userData used directly ---
@@ -911,6 +966,16 @@ export function buildCity(seed: number): City {
     group.add(crane.group);
     updateAmbientFns.push(crane.updateAmbient);
   });
+
+  // --- metro: suspended monorail threading Ring 0/1 (About street, Shibuya, boulevard,
+  // bridge approach — spec §4.3). Its `update(t)` is keyed to global scroll progress
+  // (not wall-clock), so it goes through `updateFns`, not `updateAmbientFns`.
+  {
+    const rng = makeRng(seed + CITY_SEED_SALT.metro);
+    const metro = buildMetro(rng);
+    group.add(metro.group);
+    updateFns.push(metro.update);
+  }
 
   // --- crowds ---
   layout.crowds.forEach((c, i) => {
