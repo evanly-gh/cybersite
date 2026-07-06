@@ -142,6 +142,14 @@ export function runViewer(): void {
     }
   }
 
+  // Draw-call audit hook: EffectComposer's bloom/CA passes each issue their own internal
+  // renderer.render() call, and WebGLRenderer.info auto-resets at the start of EVERY
+  // render() call — so with the default autoReset, info.render.calls after core.render()
+  // below would reflect only the LAST internal pass (a single fullscreen quad), not the
+  // real scene draw count. Disabling autoReset here lets calls accumulate across the
+  // whole composer pipeline for this one-shot viewer frame (a fresh renderer per page
+  // load, so no reset-before-render is needed).
+  core.renderer.info.autoReset = false;
   core.render();
   // WebGL canvases (no `preserveDrawingBuffer`) only guarantee their drawing buffer is
   // visible to the compositor for the paint that immediately follows the draw call --
@@ -153,6 +161,13 @@ export function runViewer(): void {
   // frame that was actually drawn.
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
+      // Draw-call audit hook (Task 20 city budget, reusable by any asset): read after
+      // the frame above has actually rendered so renderer.info reflects that draw.
+      (window as unknown as { __DRAW_CALLS__?: number }).__DRAW_CALLS__ = core.renderer.info.render.calls;
+      const dbg = window as unknown as { __SCENE__?: THREE.Scene; __CAMERA__?: THREE.Camera; __THREE__?: typeof THREE };
+      dbg.__SCENE__ = scene;
+      dbg.__CAMERA__ = camera;
+      dbg.__THREE__ = THREE;
       window.__READY = true;
     });
   });
