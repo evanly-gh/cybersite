@@ -40,11 +40,13 @@ export const METRO_PHASE = 0.62;
 const GIRDER_Y = 16; // girder core height (spec: y 14–18)
 const GIRDER_CORE_R = 0.55; // TubeGeometry backbone radius (radial=4 -> box girder)
 const RIB_HALF_W = 0.95; // box-girder cross-section half-width
-const RIB_HALF_H = 0.7; // box-girder cross-section half-height
+// Exported so tests can pin the pylon-underside sign fix and draw-call budget without
+// duplicating these magic numbers.
+export const RIB_HALF_H = 0.7; // box-girder cross-section half-height
 const GIRDER_TOP = RIB_HALF_H; // local y of girder top (bogies grip here)
-const GIRDER_BOTTOM = -RIB_HALF_H; // local y of girder underside
+export const GIRDER_BOTTOM = -RIB_HALF_H; // local y of girder underside
 
-const PYLON_SPACING = 35; // T-pylon every 35 m
+export const PYLON_SPACING = 35; // T-pylon every 35 m
 const RUN_LIGHT_OUT = RIB_HALF_W + 0.12; // running-light lateral offset from centreline
 const RUN_LIGHT_DOWN = RIB_HALF_H - 0.05; // running-light drop below girder centre
 
@@ -392,8 +394,8 @@ function buildTrack(rng: Rng): THREE.Group {
     buildOffsetTube(+1, RIB_HALF_H + 0.35, RIB_HALF_W * 0.55, 0.16, structMat, 'cableTray')
   );
 
-  // T-pylons every PYLON_SPACING metres down to the ground (skip the distant far leg
-  // where the loop is behind everything and off any street).
+  // T-pylons every PYLON_SPACING metres down to the ground (skips the distant far leg
+  // where the loop is behind everything and off any street — see buildPylons).
   buildPylons(group, rng, pathLen);
 
   return group;
@@ -411,6 +413,22 @@ function offsetPathY(dy: number): THREE.CatmullRomCurve3 {
   return new THREE.CatmullRomCurve3(pts, true, 'centripetal');
 }
 
+interface PylonPlan {
+  pylonMat: THREE.Matrix4; // world transform of the pylon's base frame (pos + track-aligned rotation)
+  h: number; // column height: ground (0) up to the girder UNDERSIDE
+  hasGraffiti: boolean;
+  graffitiOffsetY: number;
+  strobeWorldPos: THREE.Vector3;
+  phase: number;
+}
+
+/**
+ * T-pylons every PYLON_SPACING metres, ground to girder underside. Repeated structure
+ * (column + T-cap + braces, hazard base, graffiti decals, strobes) is drawn via a
+ * handful of InstancedMesh/Points draw calls total (see farField.ts's InstancedMesh
+ * pattern) rather than one Group+mesh per pylon, so pylon count stays cheap against
+ * the city-wide draw-call budget.
+ */
 function buildPylons(group: THREE.Group, rng: Rng, pathLen: number): void {
   const structMat = darkStructureMat();
   const hazardMat = new THREE.MeshStandardMaterial({
@@ -424,60 +442,150 @@ function buildPylons(group: THREE.Group, rng: Rng, pathLen: number): void {
     roughness: 0.9,
     metalness: 0
   });
-  const strobeMat = glowMat(COLORS.sodiumAmber, 4.0);
 
-  const nPylons = Math.floor(pathLen / PYLON_SPACING);
+  const nPylonsRaw = Math.floor(pathLen / PYLON_SPACING);
   const frame: PathFrame = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
-  const strobes: THREE.Mesh[] = [];
 
-  for (let i = 0; i < nPylons; i++) {
-    const u = i / nPylons;
+  const _pos = new THREE.Vector3();
+  const _scale = new THREE.Vector3(1, 1, 1);
+  const plans: PylonPlan[] = [];
+
+  for (let i = 0; i < nPylonsRaw; i++) {
+    const u = i / nPylonsRaw;
     pathFrameAt(u, frame);
     const gx = frame.pos.x;
     const gy = frame.pos.y;
     const gz = frame.pos.z;
-    const h = gy - GIRDER_BOTTOM; // column reaches from ground (0) to girder underside
+    // Skip the distant far return leg (z well behind the near streets, off-street and
+    // behind everything) — not worth spending pylons on.
+    if (gz < -400) continue;
 
-    const pylon = new THREE.Group();
-    pylon.position.set(gx, 0, gz);
-    // orient the T-cap across the track (align pylon local +Z with track 'right')
-    pylon.quaternion.copy(frame.quat);
+    const h = gy + GIRDER_BOTTOM; // column reaches from ground (0) to the girder UNDERSIDE
 
-    const parts: GeometryPart[] = [];
-    // Vertical column (in pylon-local space, up along +Y, centred under girder)
-    parts.push(boxPart(0, h / 2, 0, 0.9, h, 0.9));
-    // T-cap: horizontal cross-beam just under the girder
-    parts.push(boxPart(0, h - 0.3, 0, 0.6, 0.6, RIB_HALF_W * 2 + 1.6));
-    // two diagonal-ish braces (as short angled boxes approximated by thin verticals)
-    parts.push(boxPart(0, h - 1.4, RIB_HALF_W + 0.5, 0.35, 2.2, 0.35));
-    parts.push(boxPart(0, h - 1.4, -(RIB_HALF_W + 0.5), 0.35, 2.2, 0.35));
-    pylon.add(mergeOne(parts, structMat, 'pylonStruct'));
+    const pylonMat = new THREE.Matrix4().compose(
+      _pos.set(gx, 0, gz),
+      frame.quat.clone(),
+      _scale
+    );
+    const strobeWorldPos = new THREE.Vector3(0, h - 0.3, 0).applyMatrix4(pylonMat);
 
-    // Hazard-striped base collar
-    const baseGeom = new THREE.BoxGeometry(1.15, 2.4, 1.15);
-    const base = new THREE.Mesh(baseGeom, hazardMat);
-    base.position.set(0, 1.2, 0);
-    pylon.add(base);
-
-    // Graffiti decal on a random subset of columns (facing +X-ish)
-    if (rng.chance(0.5)) {
-      const decal = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 1.8), graffitiMat);
-      decal.position.set(0.46, rng.range(2.5, 4.5), 0);
-      decal.rotation.y = Math.PI / 2;
-      pylon.add(decal);
-    }
-
-    // Small amber strobe on the cap (iteration detail) — blinks in update via emissive.
-    const strobe = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6), strobeMat.clone());
-    strobe.position.set(0, h - 0.3, 0);
-    strobe.userData.phase = i * 0.37;
-    pylon.add(strobe);
-    strobes.push(strobe);
-
-    group.add(pylon);
+    plans.push({
+      pylonMat,
+      h,
+      hasGraffiti: rng.chance(0.5),
+      graffitiOffsetY: rng.range(2.5, 4.5),
+      strobeWorldPos,
+      phase: i * 0.37
+    });
   }
 
-  group.userData.strobes = strobes;
+  const nPylons = plans.length;
+  if (nPylons === 0) return;
+
+  const localMat = new THREE.Matrix4();
+  const worldMat = new THREE.Matrix4();
+  const zeroQuat = new THREE.Quaternion();
+
+  // --- 1) Structural boxes (column + T-cap + 2 braces): one InstancedMesh, 4 instances/pylon.
+  const PARTS_PER_PYLON = 4;
+  const structMesh = new THREE.InstancedMesh(unitBox, structMat, nPylons * PARTS_PER_PYLON);
+  structMesh.name = 'pylonStruct';
+  let idx = 0;
+  for (const p of plans) {
+    const { h } = p;
+    // column
+    localMat.compose(_pos.set(0, h / 2, 0), zeroQuat, _scale.set(0.9, h, 0.9));
+    structMesh.setMatrixAt(idx++, worldMat.multiplyMatrices(p.pylonMat, localMat));
+    // T-cap: horizontal cross-beam just under the girder
+    localMat.compose(_pos.set(0, h - 0.3, 0), zeroQuat, _scale.set(0.6, 0.6, RIB_HALF_W * 2 + 1.6));
+    structMesh.setMatrixAt(idx++, worldMat.multiplyMatrices(p.pylonMat, localMat));
+    // two diagonal-ish braces (short angled boxes approximated by thin verticals)
+    localMat.compose(_pos.set(0, h - 1.4, RIB_HALF_W + 0.5), zeroQuat, _scale.set(0.35, 2.2, 0.35));
+    structMesh.setMatrixAt(idx++, worldMat.multiplyMatrices(p.pylonMat, localMat));
+    localMat.compose(_pos.set(0, h - 1.4, -(RIB_HALF_W + 0.5)), zeroQuat, _scale.set(0.35, 2.2, 0.35));
+    structMesh.setMatrixAt(idx++, worldMat.multiplyMatrices(p.pylonMat, localMat));
+  }
+  structMesh.instanceMatrix.needsUpdate = true;
+  group.add(structMesh);
+
+  // --- 2) Hazard-striped base collars: one InstancedMesh.
+  const hazardMesh = new THREE.InstancedMesh(unitBox, hazardMat, nPylons);
+  hazardMesh.name = 'pylonHazardBase';
+  plans.forEach((p, i) => {
+    localMat.compose(_pos.set(0, 1.2, 0), zeroQuat, _scale.set(1.15, 2.4, 1.15));
+    hazardMesh.setMatrixAt(i, worldMat.multiplyMatrices(p.pylonMat, localMat));
+  });
+  hazardMesh.instanceMatrix.needsUpdate = true;
+  group.add(hazardMesh);
+
+  // --- 3) Graffiti decals on a random subset of columns: one InstancedMesh.
+  const graffitiPlans = plans.filter((p) => p.hasGraffiti);
+  if (graffitiPlans.length > 0) {
+    const decalGeom = new THREE.PlaneGeometry(0.9, 1.8);
+    const decalQuat = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, Math.PI / 2);
+    const graffitiMesh = new THREE.InstancedMesh(decalGeom, graffitiMat, graffitiPlans.length);
+    graffitiMesh.name = 'pylonGraffiti';
+    graffitiPlans.forEach((p, i) => {
+      localMat.compose(_pos.set(0.46, p.graffitiOffsetY, 0), decalQuat, _scale.set(1, 1, 1));
+      graffitiMesh.setMatrixAt(i, worldMat.multiplyMatrices(p.pylonMat, localMat));
+    });
+    graffitiMesh.instanceMatrix.needsUpdate = true;
+    group.add(graffitiMesh);
+  }
+
+  // --- 4) Amber strobes: a single Points draw call, per-instance phase, deterministic in t.
+  const strobePositions = new Float32Array(nPylons * 3);
+  const strobePhases = new Float32Array(nPylons);
+  plans.forEach((p, i) => {
+    strobePositions[i * 3 + 0] = p.strobeWorldPos.x;
+    strobePositions[i * 3 + 1] = p.strobeWorldPos.y;
+    strobePositions[i * 3 + 2] = p.strobeWorldPos.z;
+    strobePhases[i] = p.phase;
+  });
+  const strobeGeom = new THREE.BufferGeometry();
+  strobeGeom.setAttribute('position', new THREE.BufferAttribute(strobePositions, 3));
+  strobeGeom.setAttribute('aPhase', new THREE.BufferAttribute(strobePhases, 1));
+  strobeGeom.computeBoundingSphere();
+
+  const strobeMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uColor: { value: new THREE.Color(COLORS.sodiumAmber) }
+    },
+    vertexShader: /* glsl */ `
+      attribute float aPhase;
+      varying float vPhase;
+      void main() {
+        vPhase = aPhase;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = 900.0 / -mv.z;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform vec3 uColor;
+      varying float vPhase;
+      void main() {
+        vec2 d = gl_PointCoord - 0.5;
+        if (dot(d, d) > 0.25) discard;
+        // Deterministic blink in uTime (== global t), matching the original per-strobe
+        // emissive pulse: mostly-on with occasional bright peaks.
+        float on = step(0.6, sin(uTime * 24.0 + vPhase));
+        float intensity = 0.4 + mix(0.05, 1.0, on) * 4.0;
+        gl_FragColor = vec4(uColor * intensity, 1.0);
+      }
+    `,
+    fog: false,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  });
+  const strobePoints = new THREE.Points(strobeGeom, strobeMat);
+  strobePoints.name = 'pylonStrobes';
+  strobePoints.frustumCulled = false;
+  group.add(strobePoints);
+
+  group.userData.strobeMaterial = strobeMat;
 }
 
 // ---------------------------------------------------------------------------------
@@ -674,17 +782,13 @@ export function buildMetro(rng: Rng): MetroAsset {
   const train = buildTrain(rng);
   group.add(train.group);
 
-  const strobes: THREE.Mesh[] = (track.userData.strobes as THREE.Mesh[]) ?? [];
+  const strobeMaterial = track.userData.strobeMaterial as THREE.ShaderMaterial | undefined;
 
   function update(t: number): void {
     const pathU = wrap01(t * METRO_SPEED + METRO_PHASE);
     train.place(pathU, t);
-    // Deterministic strobe blink (function of t only).
-    for (const s of strobes) {
-      const phase = s.userData.phase as number;
-      const on = Math.sin(t * 24 + phase) > 0.6 ? 1 : 0.05;
-      (s.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.4 + on * 4;
-    }
+    // Deterministic strobe blink (function of t only) — computed on the GPU from uTime.
+    if (strobeMaterial) strobeMaterial.uniforms.uTime.value = t;
   }
 
   update(0);

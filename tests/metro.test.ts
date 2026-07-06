@@ -29,7 +29,30 @@ function makeCtxStub(): CanvasRenderingContext2D {
   })
 };
 
-import { buildMetro, METRO_SPEED, METRO_PATH, buildMetroTrainDemo } from '../src/assets/metro/metro';
+import {
+  buildMetro,
+  METRO_SPEED,
+  METRO_PATH,
+  buildMetroTrainDemo,
+  RIB_HALF_H,
+  GIRDER_BOTTOM
+} from '../src/assets/metro/metro';
+
+/** Nearest girder world-y to (x,z) by brute-force sampling METRO_PATH (fine for tests). */
+function nearestGirderY(x: number, z: number, samples = 3000): number {
+  const p = new THREE.Vector3();
+  let bestDist = Infinity;
+  let bestY = NaN;
+  for (let i = 0; i < samples; i++) {
+    METRO_PATH.getPointAt(i / samples, p);
+    const d = (p.x - x) ** 2 + (p.z - z) ** 2;
+    if (d < bestDist) {
+      bestDist = d;
+      bestY = p.y;
+    }
+  }
+  return bestY;
+}
 
 const T_SWEEP = [0, 0.05, 0.13, 0.17, 0.25, 0.33, 0.5, 0.63, 0.71, 0.86, 1, 2.4, 7.9];
 
@@ -116,6 +139,76 @@ describe('metro: source-level house rules', () => {
   it('exports METRO_SPEED with a TUNE marker in source', () => {
     expect(metroSrc.includes('METRO_SPEED')).toBe(true);
     expect(metroSrc.includes('TUNE')).toBe(true);
+  });
+});
+
+describe('metro: pylons', () => {
+  it('draw-call budget: pylon layer is a handful of InstancedMesh/Points, not one mesh per pylon', () => {
+    const m = buildMetro(makeRng(6));
+    const track = m.group.getObjectByName('metroTrack') as THREE.Group;
+    const pylonNodes = track.children.filter((c) => c.name.startsWith('pylon'));
+    expect(pylonNodes.length).toBeGreaterThan(0);
+    expect(pylonNodes.length).toBeLessThanOrEqual(10); // single-digit draw calls regardless of pylon count
+
+    const struct = m.group.getObjectByName('pylonStruct') as THREE.InstancedMesh;
+    expect(struct).toBeInstanceOf(THREE.InstancedMesh);
+    // Many pylons batched into this one draw call (4 box instances per pylon).
+    expect(struct.count).toBeGreaterThan(40);
+
+    const hazard = m.group.getObjectByName('pylonHazardBase') as THREE.InstancedMesh;
+    expect(hazard).toBeInstanceOf(THREE.InstancedMesh);
+
+    const strobes = m.group.getObjectByName('pylonStrobes') as THREE.Points;
+    expect(strobes).toBeInstanceOf(THREE.Points);
+  });
+
+  it('T-cap and strobe sit BELOW the girder underside (pylon-height sign-fix pin)', () => {
+    const m = buildMetro(makeRng(6));
+    const struct = m.group.getObjectByName('pylonStruct') as THREE.InstancedMesh;
+    const strobePts = m.group.getObjectByName('pylonStrobes') as THREE.Points;
+
+    const pos = new THREE.Vector3();
+    const quat = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    const mat = new THREE.Matrix4();
+
+    const nPylons = struct.count / 4;
+    expect(Number.isInteger(nPylons)).toBe(true);
+    let tCapChecked = 0;
+    for (let p = 0; p < nPylons; p++) {
+      // Instance order per pylon is [column, T-cap, brace, brace] — index 1 is the T-cap.
+      struct.getMatrixAt(p * 4 + 1, mat);
+      mat.decompose(pos, quat, scale);
+      const gy = nearestGirderY(pos.x, pos.z);
+      // If the old sign bug (h = gy - GIRDER_BOTTOM) were reintroduced, the T-cap would
+      // land ABOVE the girder top instead of just under its underside.
+      expect(pos.y).toBeLessThan(gy + RIB_HALF_H);
+      expect(pos.y).toBeLessThanOrEqual(gy - RIB_HALF_H + 0.05);
+      tCapChecked++;
+    }
+    expect(tCapChecked).toBeGreaterThan(0);
+
+    // Strobe positions (Points geometry) must also sit below the girder underside.
+    const strobePos = strobePts.geometry.getAttribute('position');
+    expect(strobePos.count).toBeGreaterThan(0);
+    let strobesChecked = 0;
+    for (let i = 0; i < strobePos.count; i++) {
+      const sx = strobePos.getX(i);
+      const sy = strobePos.getY(i);
+      const sz = strobePos.getZ(i);
+      const gy = nearestGirderY(sx, sz);
+      expect(sy).toBeLessThan(gy + RIB_HALF_H);
+      strobesChecked++;
+    }
+    expect(strobesChecked).toBeGreaterThan(0);
+  });
+
+  it('pylon column still reaches the ground (y=0) at its base', () => {
+    const m = buildMetro(makeRng(6));
+    const struct = m.group.getObjectByName('pylonStruct') as THREE.InstancedMesh;
+    struct.computeBoundingBox();
+    const bb = struct.boundingBox as THREE.Box3;
+    expect(bb.min.y).toBeLessThanOrEqual(0.5); // column base sits at/near ground level
   });
 });
 
