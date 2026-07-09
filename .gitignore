@@ -1,7 +1,6 @@
-.superpowers/
+
 node_modules/
-dist/
+
 shots/
 .env
 .env.local
-*.log
