@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { makeRng } from '../utils/rng';
+import type { Rng } from '../utils/rng';
 import { roadFrame, ROUTE_U } from '../world/route';
 import {
   buildHatchback,
@@ -27,11 +27,21 @@ import { buildHoverA, buildHoverB, type HoverAsset } from '../assets/vehicles/ho
  *
  * Car mix: cheap 40%, average 40%, luxury 20%.
  * Max 2 unique builds per vehicle type (pooled/cloned).
- * Ground vehicles: ~26. Hover vehicles: ~5.
+ * Ground vehicles: ~28. Hover vehicles: ~5.
+ *
+ * Sky hover vehicles follow gentle S-curve paths:
+ *   lateral sway = sin(t * 2π * 0.8 + phaseOffset) * 3.0 m (along binormal)
+ *   y oscillation = baseY + sin(t * 2π * 0.6 + phaseY) * 4.0 m
  */
 
 // Approximate total route arc length — used only for wheel-spin speed feel.
 const ROUTE_LENGTH_APPROX = 2000; // metres (intentionally rough)
+
+// ---------------------------------------------------------------------------
+// Module-scope pre-allocated vectors for the hot update path (no per-frame alloc)
+// ---------------------------------------------------------------------------
+const _negTangent = new THREE.Vector3();
+const _hoverWorldPos = new THREE.Vector3();
 
 // ---------------------------------------------------------------------------
 // Lane wobble: per-car seeded sine, ±0.15 m along binormal
@@ -68,6 +78,12 @@ interface HoverSlot {
   /** additional y above road surface */
   skyY: number;
   wobbleSeed: number;
+  /** true = this hover is a sky-lane vehicle (y 22–34); applies S-curve weave */
+  isSkyLane: boolean;
+  /** per-vehicle phase offset for lateral sway (seeded from rng) */
+  phaseOffset: number;
+  /** per-vehicle phase offset for y oscillation (seeded from rng) */
+  phaseY: number;
 }
 
 type VehicleSlot = GroundSlot | HoverSlot;
@@ -82,7 +98,7 @@ type HoverPool = { A: HoverAsset[]; B: HoverAsset[] };
 function getOrBuildGround(
   pool: GroundPool,
   type: string,
-  rng: import('../utils/rng').Rng
+  rng: Rng
 ): CarAsset {
   if (!pool[type]) pool[type] = [];
   const p = pool[type];
@@ -108,7 +124,7 @@ function getOrBuildGround(
 function getOrBuildHover(
   pool: HoverPool,
   type: 'A' | 'B',
-  rng: import('../utils/rng').Rng
+  rng: Rng
 ): HoverAsset {
   const p = pool[type];
   if (p.length < 2) {
@@ -127,7 +143,7 @@ function getOrBuildHover(
 
 type GroundType = 'hatchback' | 'keiVan' | 'sedan' | 'crossover' | 'lambo' | 'gt';
 
-function pickCarType(rng: import('../utils/rng').Rng): GroundType {
+function pickCarType(rng: Rng): GroundType {
   const roll = rng();
   if (roll < 0.20) return 'hatchback';
   if (roll < 0.40) return 'keiVan';
@@ -181,7 +197,7 @@ export interface TrafficSystem {
   update(t: number): void;
 }
 
-export function buildTraffic(rng: import('../utils/rng').Rng): TrafficSystem {
+export function buildTraffic(rng: Rng): TrafficSystem {
   const group = new THREE.Group();
   group.name = 'traffic';
 
@@ -189,9 +205,8 @@ export function buildTraffic(rng: import('../utils/rng').Rng): TrafficSystem {
   const groundPool: GroundPool = {};
   const hoverPool: HoverPool = { A: [], B: [] };
 
-  // Use a fixed-seed RNG for slot/vehicle building so the result is independent
-  // of how many RNG calls the caller has already consumed.
-  const buildRng = makeRng(2137);
+  // Use the caller-supplied rng for all slot/vehicle building so the caller
+  // fully controls seeding and the result is deterministic relative to rng's state.
 
   // -----------------------------------------------------------------------
   // Shorthand registrars
@@ -203,9 +218,9 @@ export function buildTraffic(rng: import('../utils/rng').Rng): TrafficSystem {
     laneOffset: number,
     type?: GroundType
   ): void {
-    const carType = type ?? pickCarType(buildRng);
-    const asset = getOrBuildGround(groundPool, carType, buildRng);
-    const wobbleSeed = buildRng.range(0, 100);
+    const carType = type ?? pickCarType(rng);
+    const asset = getOrBuildGround(groundPool, carType, rng);
+    const wobbleSeed = rng.range(0, 100);
     const wheelSpeed = Math.abs(laneSpeed) * ROUTE_LENGTH_APPROX;
     slots.push({ kind: 'ground', asset, u0, laneSpeed, laneOffset, wobbleSeed, wheelSpeed });
     group.add(asset.group);
@@ -216,15 +231,19 @@ export function buildTraffic(rng: import('../utils/rng').Rng): TrafficSystem {
     laneSpeed: number,
     laneOffset: number,
     skyY: number,
-    type: 'A' | 'B' = 'A'
+    type: 'A' | 'B' = 'A',
+    isSkyLane = false
   ): void {
-    const asset = getOrBuildHover(hoverPool, type, buildRng);
+    const asset = getOrBuildHover(hoverPool, type, rng);
     const wrapper = new THREE.Group();
     wrapper.name = `hoverWrapper_${slots.length}`;
     wrapper.add(asset.group);
     group.add(wrapper);
-    const wobbleSeed = buildRng.range(0, 100);
-    slots.push({ kind: 'hover', asset, wrapper, u0, laneSpeed, laneOffset, skyY, wobbleSeed });
+    const wobbleSeed = rng.range(0, 100);
+    // Per-vehicle phase offsets for S-curve (seeded from rng so they're deterministic)
+    const phaseOffset = rng.range(0, Math.PI * 2);
+    const phaseY      = rng.range(0, Math.PI * 2);
+    slots.push({ kind: 'hover', asset, wrapper, u0, laneSpeed, laneOffset, skyY, wobbleSeed, isSkyLane, phaseOffset, phaseY });
   }
 
   // -----------------------------------------------------------------------
@@ -264,7 +283,7 @@ export function buildTraffic(rng: import('../utils/rng').Rng): TrafficSystem {
 
   // -----------------------------------------------------------------------
   // BOULEVARD — 2+2 lanes: ±3.5 m and ±7 m
-  // Target: 13 ground cars (including 1 parked) + 1 street-level hover taxi
+  // Target: 11 ground cars (including 1 parked) + 1 street-level hover taxi
   // -----------------------------------------------------------------------
   // Inner right (+3.5 m), 3 cars, same-direction
   for (const u0 of spawnPoints(uBlvdStart, uBlvdEnd, 3)) {
@@ -285,7 +304,7 @@ export function buildTraffic(rng: import('../utils/rng').Rng): TrafficSystem {
   // Parked at right curb (static)
   addCar(uBlvdStart + (uBlvdEnd - uBlvdStart) * 0.6, 0.0, 9.5, 'hatchback');
   // Pulled-over taxi hover at boulevard (street-level, y ≈ 4 m)
-  addHoverVehicle(ROUTE_U.shibuyaCenter + 0.025, 0.0, 8.0, 4.0, 'B');
+  addHoverVehicle(ROUTE_U.shibuyaCenter + 0.025, 0.0, 8.0, 4.0, 'B', false);
 
   // -----------------------------------------------------------------------
   // SKYWAY — 1+1 lanes: ±3.5 m. Narrow elevated road.
@@ -311,28 +330,36 @@ export function buildTraffic(rng: import('../utils/rng').Rng): TrafficSystem {
 
   // -----------------------------------------------------------------------
   // SKY LANES — 4 hovers (2 above About street, 2 above Boulevard)
+  // y 22–34, gentle S-curves above each street (isSkyLane = true)
   // -----------------------------------------------------------------------
   // Sky lane 1: above About street, y = 22 m, rightward offset
   for (const u0 of spawnPoints(uAboutStart, uAboutEnd, 1)) {
-    addHoverVehicle(u0, 0.0048, 8.0, 22.0, 'A');
+    addHoverVehicle(u0, 0.0048, 8.0, 22.0, 'A', true);
   }
   // Sky lane 2: above boulevard, y = 28 m, oncoming
   for (const u0 of spawnPoints(uBlvdStart, uBlvdEnd, 1)) {
-    addHoverVehicle(u0, -0.0042, -9.0, 28.0, 'B');
+    addHoverVehicle(u0, -0.0042, -9.0, 28.0, 'B', true);
   }
   // Sky lane 3: above boulevard, y = 34 m, same-direction
   for (const u0 of spawnPoints(uBlvdStart + 0.02, uBlvdEnd, 1)) {
-    addHoverVehicle(u0, 0.0036, 11.0, 34.0, 'A');
+    addHoverVehicle(u0, 0.0036, 11.0, 34.0, 'A', true);
   }
   // Sky lane 4: above About street, y = 26 m (second pass)
   for (const u0 of spawnPoints(uAboutStart + 0.05, uAboutEnd - 0.05, 1)) {
-    addHoverVehicle(u0, -0.0040, -6.0, 26.0, 'B');
+    addHoverVehicle(u0, -0.0040, -6.0, 26.0, 'B', true);
   }
 
   // -----------------------------------------------------------------------
   // Update function — called with scroll parameter t ∈ [0, 1]
   // -----------------------------------------------------------------------
   const _up = new THREE.Vector3(0, 1, 0);
+
+  // Sky-lane S-curve constants
+  const SKY_SWAY_AMP  = 3.0;  // metres lateral
+  const SKY_SWAY_FREQ = 0.8;  // cycles per unit-t
+  const SKY_Y_AMP     = 4.0;  // metres vertical
+  const SKY_Y_FREQ    = 0.6;  // cycles per unit-t
+  const TAU = Math.PI * 2;
 
   function update(t: number): void {
     for (const slot of slots) {
@@ -350,9 +377,14 @@ export function buildTraffic(rng: import('../utils/rng').Rng): TrafficSystem {
           .addScaledVector(frame.binormal, lateral);
 
         // Orientation: car forward = tangent (or negated for oncoming)
-        const faceTangent = slot.laneSpeed >= 0
-          ? frame.tangent
-          : frame.tangent.clone().negate();
+        // Use pre-allocated _negTangent to avoid per-frame clone()
+        let faceTangent: THREE.Vector3;
+        if (slot.laneSpeed >= 0) {
+          faceTangent = frame.tangent;
+        } else {
+          _negTangent.copy(frame.tangent).negate();
+          faceTangent = _negTangent;
+        }
         orientFromTangent(slot.asset.group, faceTangent, frame.normal);
 
         // Wheel spin speed
@@ -362,16 +394,34 @@ export function buildTraffic(rng: import('../utils/rng').Rng): TrafficSystem {
       } else {
         // Hover: wrapper handles world position + orientation;
         // asset.group handles bob/sway/thruster internally via update(t).
-        const worldPos = new THREE.Vector3()
+
+        // Compute lateral: base + S-curve sway for sky-lane vehicles
+        let skyLateral = lateral;
+        let skyY = slot.skyY;
+
+        if (slot.isSkyLane) {
+          // Gentle S-curve weave along binormal
+          const sway = Math.sin(t * TAU * SKY_SWAY_FREQ + slot.phaseOffset) * SKY_SWAY_AMP;
+          skyLateral = lateral + sway;
+          // Gentle y oscillation within the y 22–34 range
+          skyY = slot.skyY + Math.sin(t * TAU * SKY_Y_FREQ + slot.phaseY) * SKY_Y_AMP;
+        }
+
+        _hoverWorldPos
           .copy(frame.pos)
-          .addScaledVector(frame.binormal, lateral);
-        worldPos.y += slot.skyY;
+          .addScaledVector(frame.binormal, skyLateral);
+        _hoverWorldPos.y += skyY;
 
-        slot.wrapper.position.copy(worldPos);
+        slot.wrapper.position.copy(_hoverWorldPos);
 
-        const faceTangent = slot.laneSpeed >= 0
-          ? frame.tangent
-          : frame.tangent.clone().negate();
+        // Use pre-allocated _negTangent to avoid per-frame clone()
+        let faceTangent: THREE.Vector3;
+        if (slot.laneSpeed >= 0) {
+          faceTangent = frame.tangent;
+        } else {
+          _negTangent.copy(frame.tangent).negate();
+          faceTangent = _negTangent;
+        }
         orientFromTangent(slot.wrapper, faceTangent, _up);
 
         // Call hover's own update — it modifies asset.group.position.y (bob) and
