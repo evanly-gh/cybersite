@@ -1,0 +1,309 @@
+# Review package: e8e1572..HEAD
+
+## Commits
+85d7b93 feat: authored city route spline with named waypoints
+
+## Files changed
+ src/main.ts         |  72 +++++++++++++++++++++++++++++++++++
+ src/world/route.ts  | 108 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/route.test.ts |  38 ++++++++++++++++++
+ 3 files changed, 218 insertions(+)
+
+## Diff
+diff --git a/src/main.ts b/src/main.ts
+index 83e6f54..5d32905 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -3,20 +3,22 @@ import '@fontsource/rajdhani';
+ import '@fontsource/share-tech-mono';
+ import './styles.css';
+ import * as THREE from 'three';
+ import { COLORS } from './theme';
+ import { registerAsset } from './viewer/registry';
+ import { runViewer } from './viewer/viewer';
+ import { initCore } from './core/core';
+ import { RESUME, type ImageSlot } from './content/resume';
+ import { makePlaceholder } from './content/placeholders';
+ import { AD_SIZES, makeAd, type AdFormat } from './content/adGenerator';
++import { ROUTE, WAYPOINTS } from './world/route';
++import { makeCanvasTexture } from './utils/canvasText';
+ 
+ /**
+  * TEMP sanity scene for Task 4 verification: a grid of emissive-magenta boxes with a
+  * slow orbiting camera. Exercised by `npm run shoot -- --scroll 0`. Superseded once
+  * Task 25 wires the real scroll-driven scene graph.
+  */
+ function buildSanityScene(canvas: HTMLCanvasElement): void {
+   const core = initCore(canvas);
+ 
+   const geo = new THREE.BoxGeometry(1, 1, 1);
+@@ -98,20 +100,87 @@ function buildWall(cells: WallCell[], cols: number, cellW: number, cellH: number
+     const mesh = new THREE.Mesh(geo, mat);
+     const x = -totalWidth / 2 + col * pitchX + cellW / 2;
+     const y = totalHeight / 2 - row * pitchY - cellH / 2;
+     mesh.position.set(x, y, 0);
+     group.add(mesh);
+   });
+ 
+   return group;
+ }
+ 
++// The real ROUTE spans ~2000m (introStart to bridgeEnd); core's FogExp2 (density 0.0016)
++// and the viewer's auto-framing camera distance are tuned for the small (~10-20 unit)
++// sanity-scene props elsewhere in this file. At true scale the auto-framed camera sits
++// ~2600 units back, which is deep enough into the exponential fog falloff to render
++// fully black. Per the task brief ("adjust the debug asset, not the route"), the whole
++// debug group is rendered at DISPLAY_SCALE and the tube/marker/label sizes are
++// pre-multiplied by 1/DISPLAY_SCALE so their final on-screen size is unchanged — only
++// the positions (and thus camera distance / fog depth) shrink.
++const DISPLAY_SCALE = 0.15;
++const TUBE_RADIUS = 1.2;
++const MARKER_RADIUS = 3.5;
++const LABEL_OFFSET_Y = 10;
++const LABEL_WIDTH = 32;
++const LABEL_HEIGHT = 8;
++
++/**
++ * Task 6 verification asset: renders the authored ROUTE spline as an emissive-cyan tube
++ * with a small magenta marker sphere and a canvas-sprite text label at every named
++ * WAYPOINTS entry. Lets us eyeball the L-shaped street layout, the ramp/skyway/bridge
++ * elevation changes, and waypoint naming before any real street/building geometry
++ * exists. See DISPLAY_SCALE comment above for why this isn't rendered at true scale.
++ */
++function buildRouteDebug(): THREE.Group {
++  const group = new THREE.Group();
++
++  const tubeGeo = new THREE.TubeGeometry(ROUTE, 512, TUBE_RADIUS / DISPLAY_SCALE, 12, false);
++  const tubeMat = new THREE.MeshStandardMaterial({
++    color: COLORS.tronCyan,
++    emissive: COLORS.tronCyan,
++    emissiveIntensity: 2.5,
++    metalness: 0.1,
++    roughness: 0.3
++  });
++  group.add(new THREE.Mesh(tubeGeo, tubeMat));
++
++  const markerGeo = new THREE.SphereGeometry(MARKER_RADIUS / DISPLAY_SCALE, 16, 16);
++  const markerMat = new THREE.MeshStandardMaterial({
++    color: COLORS.signalMagenta,
++    emissive: COLORS.signalMagenta,
++    emissiveIntensity: 1.8
++  });
++
++  for (const [name, pos] of Object.entries(WAYPOINTS)) {
++    const marker = new THREE.Mesh(markerGeo, markerMat);
++    marker.position.copy(pos);
++    group.add(marker);
++
++    const texture = makeCanvasTexture(320, 80, (ctx) => {
++      ctx.clearRect(0, 0, 320, 80);
++      ctx.fillStyle = 'rgba(7, 8, 15, 0.8)';
++      ctx.fillRect(0, 20, 320, 40);
++      ctx.font = 'bold 28px "Share Tech Mono", monospace';
++      ctx.fillStyle = '#ffffff';
++      ctx.textAlign = 'center';
++      ctx.textBaseline = 'middle';
++      ctx.fillText(name, 160, 40);
++    });
++    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false }));
++    sprite.position.copy(pos).add(new THREE.Vector3(0, LABEL_OFFSET_Y / DISPLAY_SCALE, 0));
++    sprite.scale.set(LABEL_WIDTH / DISPLAY_SCALE, LABEL_HEIGHT / DISPLAY_SCALE, 1);
++    group.add(sprite);
++  }
++
++  group.scale.setScalar(DISPLAY_SCALE);
++  return group;
++}
++
+ const AD_FORMATS: AdFormat[] = ['landscape', 'portrait', 'square', 'strip', 'vcard'];
+ 
+ function boot(): void {
+   if (new URLSearchParams(location.search).has('viewer')) {
+     // TEMP: verification asset for Task 2 — delete this block when Phase 2 starts.
+     registerAsset('testCube', () => {
+       const geo = new THREE.BoxGeometry(2, 2, 2);
+       const mat = new THREE.MeshStandardMaterial({
+         color: COLORS.tronCyan,
+         emissive: COLORS.tronCyan,
+@@ -138,20 +207,23 @@ function boot(): void {
+         RESUME.about.faceImage,
+         ...RESUME.about.misc,
+         ...RESUME.projectsMain.map((p) => p.image),
+         ...RESUME.projectsSmall.map((p) => p.image),
+         ...RESUME.research.map((p) => p.image)
+       ];
+       const cells: WallCell[] = slots.map((slot) => ({ texture: makePlaceholder(slot), w: slot.w, h: slot.h }));
+       return buildWall(cells, 5, 3, 3, 0.5);
+     });
+ 
++    // Task 6 verification: the authored city route spline + labeled waypoint markers.
++    registerAsset('routeDebug', () => buildRouteDebug());
++
+     runViewer();
+     return;
+   }
+ 
+   const canvas = document.getElementById('stage') as HTMLCanvasElement;
+   if (canvas) {
+     buildSanityScene(canvas);
+   }
+ 
+   console.log('boot ok');
+diff --git a/src/world/route.ts b/src/world/route.ts
+new file mode 100644
+index 0000000..e21f53d
+--- /dev/null
++++ b/src/world/route.ts
+@@ -0,0 +1,108 @@
++import * as THREE from 'three';
++
++/**
++ * The fixed city route the bike rides through the whole site. Every downstream system
++ * (streets, buildings, traffic, camera rig, moon) keys off this single authored spline —
++ * treat waypoint coordinates as load-bearing constants, not tuning knobs.
++ *
++ * Path shape: +X along "About street" from introStart to shibuyaCenter, a hard right
++ * turn onto -Z through the Shibuya-style crossing, two skate ramps (ramp1/ramp2),
++ * a climb up onto an elevated skyway, then a long bridge run out toward the moon.
++ */
++export const WAYPOINTS = {
++  introStart: new THREE.Vector3(-300, 0, 0),
++  aboutStart: new THREE.Vector3(-260, 0, 0),
++  aboutEnd: new THREE.Vector3(200, 0, 0),
++  shibuyaCenter: new THREE.Vector3(240, 0, 0),
++  driftExit: new THREE.Vector3(240, 0, -30),
++  ramp1Base: new THREE.Vector3(240, 0, -90),
++  ramp1Land: new THREE.Vector3(240, 0, -170),
++  ramp2Base: new THREE.Vector3(240, 0, -260),
++  ramp2Land: new THREE.Vector3(240, 0, -330),
++  skywayStart: new THREE.Vector3(240, 0, -420),
++  skywayTop: new THREE.Vector3(240, 28, -520),
++  skywayEnd: new THREE.Vector3(240, 28, -800),
++  bridgeStart: new THREE.Vector3(240, 14, -860),
++  bridgeEnd: new THREE.Vector3(240, 12, -1400)
++} as const;
++
++type WaypointName = keyof typeof WAYPOINTS;
++
++// Object.keys preserves insertion order for string keys — this is also the ride order.
++const WAYPOINT_ORDER = Object.keys(WAYPOINTS) as WaypointName[];
++
++export const ROUTE = new THREE.CatmullRomCurve3(
++  WAYPOINT_ORDER.map((name) => WAYPOINTS[name]),
++  false,
++  'centripetal'
++);
++
++const U_SAMPLE_COUNT = 4096;
++
++/**
++ * Maps each named waypoint to its arc-length parameter u on ROUTE, found by sampling
++ * the curve at U_SAMPLE_COUNT even steps and taking the nearest sample to the waypoint's
++ * authored position. Computed once at module load since ROUTE never changes at runtime.
++ */
++function computeRouteU(): Record<WaypointName, number> {
++  const samples: THREE.Vector3[] = [];
++  for (let i = 0; i <= U_SAMPLE_COUNT; i++) {
++    samples.push(ROUTE.getPointAt(i / U_SAMPLE_COUNT));
++  }
++
++  const result = {} as Record<WaypointName, number>;
++  for (const name of WAYPOINT_ORDER) {
++    const target = WAYPOINTS[name];
++    let bestIndex = 0;
++    let bestDistSq = Infinity;
++    for (let i = 0; i <= U_SAMPLE_COUNT; i++) {
++      const distSq = samples[i].distanceToSquared(target);
++      if (distSq < bestDistSq) {
++        bestDistSq = distSq;
++        bestIndex = i;
++      }
++    }
++    result[name] = bestIndex / U_SAMPLE_COUNT;
++  }
++  return result;
++}
++
++export const ROUTE_U: Record<WaypointName, number> = computeRouteU();
++
++export const MOON_POS = new THREE.Vector3(240, 260, -2600);
++export const MOON_RADIUS = 320;
++
++const WORLD_UP = new THREE.Vector3(0, 1, 0);
++const FALLBACK_UP = new THREE.Vector3(1, 0, 0);
++
++export interface RoadFrame {
++  pos: THREE.Vector3;
++  tangent: THREE.Vector3;
++  normal: THREE.Vector3;
++  binormal: THREE.Vector3;
++}
++
++/**
++ * Y-up-projected Frenet-like frame at arc-length parameter u. Unlike ROUTE's built-in
++ * Frenet frames (which roll around the tangent and are unstable on straight sections),
++ * this frame is derived directly from the world up vector so it stays level: binormal =
++ * tangent x up (re-normalized), normal = binormal x tangent. Used by streets, traffic
++ * lanes, and the bike path to place geometry "across" and "above" the road consistently.
++ */
++export function roadFrame(u: number): RoadFrame {
++  const clampedU = THREE.MathUtils.clamp(u, 0, 1);
++  const pos = ROUTE.getPointAt(clampedU);
++  const tangent = ROUTE.getTangentAt(clampedU).normalize();
++
++  let binormal = new THREE.Vector3().crossVectors(tangent, WORLD_UP);
++  if (binormal.lengthSq() < 1e-8) {
++    // Tangent is (near) parallel to world up — fall back to a fixed horizontal axis so
++    // binormal stays well-defined instead of collapsing to zero.
++    binormal = new THREE.Vector3().crossVectors(tangent, FALLBACK_UP);
++  }
++  binormal.normalize();
++
++  const normal = new THREE.Vector3().crossVectors(binormal, tangent).normalize();
++
++  return { pos, tangent, normal, binormal };
++}
+diff --git a/tests/route.test.ts b/tests/route.test.ts
+new file mode 100644
+index 0000000..d0e4354
+--- /dev/null
++++ b/tests/route.test.ts
+@@ -0,0 +1,38 @@
++import { describe, it, expect } from 'vitest';
++import * as THREE from 'three';
++import { WAYPOINTS, ROUTE, ROUTE_U, MOON_POS, MOON_RADIUS, roadFrame } from '../src/world/route';
++
++describe('route', () => {
++  it('total route length is within [1650, 1950] meters', () => {
++    const length = ROUTE.getLength();
++    expect(length).toBeGreaterThanOrEqual(1650);
++    expect(length).toBeLessThanOrEqual(1950);
++  });
++
++  it('shibuyaCenter sample point lands within 8m of (240, 0, 0)', () => {
++    const p = ROUTE.getPointAt(ROUTE_U.shibuyaCenter);
++    const target = new THREE.Vector3(240, 0, 0);
++    expect(p.distanceTo(target)).toBeLessThanOrEqual(8);
++  });
++
++  it('y at skywayEnd u is within 1m of 28', () => {
++    const p = ROUTE.getPointAt(ROUTE_U.skywayEnd);
++    expect(Math.abs(p.y - 28)).toBeLessThanOrEqual(1);
++  });
++
++  it('roadFrame binormal is unit-length and perpendicular to tangent across 20 sampled u', () => {
++    for (let i = 0; i < 20; i++) {
++      const u = i / 19;
++      const { tangent, binormal } = roadFrame(u);
++      expect(binormal.length()).toBeCloseTo(1, 5);
++      expect(tangent.dot(binormal)).toBeCloseTo(0, 4);
++    }
++  });
++
++  it('exposes named waypoints, moon constants matching brief', () => {
++    expect(WAYPOINTS.introStart.equals(new THREE.Vector3(-300, 0, 0))).toBe(true);
++    expect(WAYPOINTS.bridgeEnd.equals(new THREE.Vector3(240, 12, -1400))).toBe(true);
++    expect(MOON_POS.equals(new THREE.Vector3(240, 260, -2600))).toBe(true);
++    expect(MOON_RADIUS).toBe(320);
++  });
++});

@@ -1,0 +1,478 @@
+# Review package: f905e4f^..f905e4f
+
+## Commits
+f905e4f fix(rooftop): fans spin on own hubs, theme beacon colors, mast footprint, monument variety
+
+## Files changed
+ src/assets/buildings/rooftop.ts | 58 +++++++++++++++++++++++++++++------------
+ src/assets/buildings/skinny.ts  | 53 ++++++++++++++++++++++++++-----------
+ tests/skinnyRoof.test.ts        | 51 ++++++++++++++++++++++++++++++++++--
+ 3 files changed, 129 insertions(+), 33 deletions(-)
+
+## Diff
+diff --git a/src/assets/buildings/rooftop.ts b/src/assets/buildings/rooftop.ts
+index bcb7347..6cd7c51 100644
+--- a/src/assets/buildings/rooftop.ts
++++ b/src/assets/buildings/rooftop.ts
+@@ -1,25 +1,29 @@
+ import * as THREE from 'three';
+ import { COLORS } from '../../theme';
+ import type { Rng } from '../../utils/rng';
+ import type { GeometryPart } from '../../utils/merge';
+ import { boxPart, mergeOne, makeBodyMat, makeGlowMat } from './tall';
+ 
+ /**
+  * Task 12 (part 1/2): the shared rooftop clutter kit + `decorateRoof` packer.
+  *
+  * `decorateRoof` is called for EVERY Ring 0/1 building in the city (the ≥80%
+- * non-flat-roof house rule lives here), so its output budget is tight: the whole
+- * returned group is at most 3 merged meshes (body/glow/fan) regardless of how many
+- * items get packed, by routing every part through one of three shared part buckets and
+- * merging once per bucket. Fan discs are the one animated exception — they're their own
+- * tiny merged mesh so the city assembly can spin them (`userData.fans`).
++ * non-flat-roof house rule lives here), so its output budget is tight: body and glow
++ * clutter always route through two shared, merged buckets (≤2 draw calls) regardless of
++ * how many items get packed. Fan discs are the one exception: `mergeStatic` bakes each
++ * part's offset into vertex positions, which would leave a merged fan mesh's *transform*
++ * at the roof origin — spinning it would orbit every fan around the roof center instead
++ * of its own hub. So fan discs are kept as individual small `THREE.Mesh`es (geometry
++ * centered at the mesh's own local origin, `mesh.position` set to the vent's hub), one
++ * per vent unit (typically 0-2 per roof) — a small extra draw-call cost in exchange for
++ * correct per-fan spin (`userData.fans`).
+  *
+  * Everything here is built in ROOF-LOCAL space: origin at the roof's own center,
+  * resting on y=0 (callers translate the returned group to `(x, roof.y, z)`).
+  */
+ 
+ export interface RoofSpec {
+   y: number;
+   w: number;
+   d: number;
+ }
+@@ -71,48 +75,60 @@ export function buildSatelliteDish(
+   if (glowParts) {
+     const tipPos = new THREE.Vector3(x, y + mastH, z).addScaledVector(armDir, armLen);
+     glowParts.push({
+       geom: new THREE.SphereGeometry(0.06, 6, 5),
+       matrix: new THREE.Matrix4().makeTranslation(tipPos.x, tipPos.y, tipPos.z),
+       mat: 0
+     });
+   }
+ }
+ 
++/** A fan disc that must stay its own mesh (see `decorateRoof`'s fan-handling note) so it
++ * can spin around its own hub rather than the roof origin. `geom` is centered at the
++ * mesh's own local origin (not baked with a translation); `hub` is where that origin
++ * belongs in roof-local space. */
++export interface FanDisc {
++  geom: THREE.BufferGeometry;
++  hub: THREE.Vector3;
++}
++
+ /**
+- * Vent/AC unit box with a spinning fan disc on top (fan mesh returned for tagging).
++ * Vent/AC unit box with a spinning fan disc on top (fan disc descriptor returned so the
++ * caller can build its own un-merged, correctly-pivoted mesh).
+  * Round-2 detail: a small status LED on the housing face reads as a lit mechanical
+  * unit rather than a dark block.
+  */
+ export function buildVentUnit(
+   bodyParts: GeometryPart[],
+   glowParts: GeometryPart[],
+   x: number,
+   z: number,
+   y: number,
+   w: number,
+   d: number,
+   h: number
+-): GeometryPart {
++): FanDisc {
+   bodyParts.push(boxPart(new THREE.Vector3(x, y + h / 2, z), new THREE.Vector3(w, h, d)));
+   // fan housing rim
+   const r = Math.min(w, d) * 0.38;
+   bodyParts.push({
+     geom: new THREE.CylinderGeometry(r * 1.08, r * 1.08, h * 0.15, 12),
+     matrix: new THREE.Matrix4().makeTranslation(x, y + h + h * 0.05, z),
+     mat: 0
+   });
+   glowParts.push(
+     boxPart(new THREE.Vector3(x + w / 2 - 0.06, y + h * 0.35, z), new THREE.Vector3(0.05, 0.08, 0.08))
+   );
++  // Fan geometry stays centered at its own local origin (no baked matrix) so a mesh built
++  // from it can spin in place; `hub` tells the caller where to place that mesh's pivot.
+   const fanGeom = new THREE.CylinderGeometry(r, r, 0.06, 5);
+-  return { geom: fanGeom, matrix: new THREE.Matrix4().makeTranslation(x, y + h + h * 0.1, z), mat: 0 };
++  return { geom: fanGeom, hub: new THREE.Vector3(x, y + h + h * 0.1, z) };
+ }
+ 
+ /**
+  * Horizontal pipe run along one axis, elbowed at both ends. Round-2 detail: a painted
+  * amber warning band at the run's midpoint (industrial hazard-marking weathering) so
+  * the pipe reads against the dark roof instead of vanishing.
+  */
+ export function buildPipeRun(
+   bodyParts: GeometryPart[],
+   glowParts: GeometryPart[],
+@@ -328,39 +344,39 @@ export function decorateRoof(roof: RoofSpec, rng: Rng, opts: DecorateRoofOpts =
+   // Shuffle remaining slots (Fisher-Yates via rng) and take 3-7 (minus the billboard).
+   for (let i = slots.length - 1; i > 0; i--) {
+     const j = rng.int(0, i);
+     [slots[i], slots[j]] = [slots[j], slots[i]];
+   }
+   const targetCount = rng.int(3, 7) - (opts.billboard ? 1 : 0);
+   const chosen = slots.slice(0, Math.max(0, Math.min(targetCount, slots.length)));
+ 
+   const bodyParts: GeometryPart[] = [];
+   const glowParts: GeometryPart[] = [];
+-  const fanParts: GeometryPart[] = [];
++  const fanDiscs: FanDisc[] = [];
+ 
+   const slotHalfW = cellW / 2 - 0.15;
+   const slotHalfD = cellD / 2 - 0.15;
+ 
+   for (const slot of chosen) {
+     const kind = rng.pick(KINDS);
+     const { x, z } = slot;
+     switch (kind) {
+       case 'dish': {
+         const r = Math.min(slotHalfW, slotHalfD, rng.range(0.5, 1.1));
+         buildSatelliteDish(bodyParts, x, z, 0, r, rng.range(0, Math.PI * 2), rng.range(-0.3, 0.3), glowParts);
+         break;
+       }
+       case 'vent': {
+         const w = Math.min(slotHalfW * 1.6, rng.range(1.0, 1.8));
+         const d = Math.min(slotHalfD * 1.6, rng.range(1.0, 1.8));
+         const fan = buildVentUnit(bodyParts, glowParts, x, z, 0, w, d, rng.range(0.7, 1.3));
+-        fanParts.push(fan);
++        fanDiscs.push(fan);
+         break;
+       }
+       case 'pipe': {
+         const axisZ = rng.chance(0.5);
+         const len = Math.min(axisZ ? slotHalfD * 1.7 : slotHalfW * 1.7, rng.range(1.2, 2.4));
+         buildPipeRun(bodyParts, glowParts, x, z, 0, len, axisZ);
+         break;
+       }
+       case 'water': {
+         const r = Math.min(slotHalfW, slotHalfD, rng.range(0.9, 1.5));
+@@ -440,20 +456,30 @@ export function decorateRoof(roof: RoofSpec, rng: Rng, opts: DecorateRoofOpts =
+     }
+     glowParts.push({
+       geom: new THREE.SphereGeometry(0.05, 5, 4),
+       matrix: new THREE.Matrix4().makeTranslation(px, 0.95, pz),
+       mat: 0
+     });
+   }
+ 
+   if (bodyParts.length > 0) group.add(mergeOne(bodyParts, makeBodyMat(), 'clutterBody'));
+   if (glowParts.length > 0) group.add(mergeOne(glowParts, makeGlowMat(COLORS.holoTeal, 1.4), 'clutterGlow'));
+-  let fans: THREE.Mesh | undefined;
+-  if (fanParts.length > 0) {
+-    fans = mergeOne(fanParts, makeGlowMat(COLORS.shadowBlue, 0.2), 'fans');
+-    group.add(fans);
+-  }
++
++  // Fan discs stay individual meshes (NOT merged) — see the file-header note and
++  // `FanDisc` doc: mergeStatic bakes each part's offset into vertex positions, so a
++  // merged fan mesh's transform would sit at the roof origin and spinning it would orbit
++  // every fan around the roof center instead of spinning in place on its own hub. Each
++  // disc's geometry is centered at its own local origin, so `mesh.position = hub` gives
++  // it the correct pivot and `mesh.rotation.y` spins it in place.
++  const fanMat = makeGlowMat(COLORS.shadowBlue, 0.2);
++  const fans: THREE.Mesh[] = fanDiscs.map((fan, i) => {
++    const mesh = new THREE.Mesh(fan.geom, fanMat);
++    mesh.position.copy(fan.hub);
++    mesh.name = `fan${i}`;
++    group.add(mesh);
++    return mesh;
++  });
+ 
+   group.userData.footprint = [roof.w, roof.d];
+-  group.userData.fans = fans ? [fans] : [];
++  group.userData.fans = fans;
+   return group;
+ }
+diff --git a/src/assets/buildings/skinny.ts b/src/assets/buildings/skinny.ts
+index bec3845..47fa1bf 100644
+--- a/src/assets/buildings/skinny.ts
++++ b/src/assets/buildings/skinny.ts
+@@ -1,15 +1,15 @@
+ import * as THREE from 'three';
+ import { COLORS } from '../../theme';
+ import type { Rng } from '../../utils/rng';
+ import type { GeometryPart } from '../../utils/merge';
+-import { boxPart, mergeOne, makeGlowMat } from './tall';
++import { boxPart, mergeOne, makeGlowMat, makeBeaconMat } from './tall';
+ import { makeCanvasTexture, drawPanel } from '../../utils/canvasText';
+ import { buildSatelliteDish } from './rooftop';
+ 
+ /**
+  * Task 12 (part 2/2): the two skinny Ring 0/1 towers.
+  *  - buildRadioMast: ~50m tapering 3-leg lattice, cross-braced (merged into one body
+  *    mesh), 3 dish clusters at varying heights, guy wires to ground anchors, double red
+  *    beacons + a top strobe, small base equipment shed.
+  *  - buildMonument: ~22m stone plinth + abstract angular striding-figure (stacked
+  *    rotated boxes), 4 amber up-light cones, a teal additive halo torus over the head
+@@ -238,46 +238,50 @@ export function buildRadioMast(rng: Rng): THREE.Group {
+ 
+   // --- Top strobe platform + double red beacons partway down (aviation obstruction
+   // lighting: FAA-style mid-height beacons + a bright top strobe).
+   const topPlatformY = MAST_H;
+   bodyParts.push({
+     geom: new THREE.CylinderGeometry(0.5, 0.6, 0.3, 8),
+     matrix: new THREE.Matrix4().makeTranslation(0, topPlatformY, 0),
+     mat: 0
+   });
+ 
+-  const redMat = makeGlowMat(0xff2b2b, 3.2);
++  // Aviation beacons use the codebase's documented beacon convention (sodium-amber, per
++  // tall.ts's makeBeaconMat / farField's Task 8 precedent — theme has no red); the top
++  // strobe reuses the theme's moonlight white rather than a raw hex literal.
+   const beaconGeom = new THREE.SphereGeometry(0.32, 8, 6);
+   const midY = MAST_H * 0.5;
+   const beacons = mergeOne(
+     [
+       { geom: beaconGeom, matrix: new THREE.Matrix4().makeTranslation(legPos(0, midY).x, midY, legPos(0, midY).z), mat: 0 },
+       { geom: beaconGeom, matrix: new THREE.Matrix4().makeTranslation(legPos(1, midY).x, midY, legPos(1, midY).z), mat: 0 }
+     ],
+-    redMat,
++    makeBeaconMat(),
+     'beacons'
+   );
+   const strobeGeom = new THREE.SphereGeometry(0.4, 8, 6);
+   const strobe = mergeOne(
+     [{ geom: strobeGeom, matrix: new THREE.Matrix4().makeTranslation(0, topPlatformY + 0.45, 0), mat: 0 }],
+-    makeGlowMat(0xffffff, 4),
++    makeGlowMat(COLORS.moonlight, 4),
+     'strobe'
+   );
+ 
+   group.add(mergeOne(bodyParts, new THREE.MeshStandardMaterial({ color: COLORS.towerBody, roughness: 0.7, metalness: 0.4 }), 'body'));
+   group.add(mergeOne(stripeParts, makeGlowMat(COLORS.sodiumAmber, 1.6), 'stripes'));
+   if (glowParts.length > 0) group.add(mergeOne(glowParts, makeGlowMat(COLORS.holoTeal, 1.4), 'glow'));
+   group.add(beacons);
+   group.add(strobe);
+ 
+   group.userData.roofY = MAST_H;
+-  group.userData.footprint = [LEG_R_BASE * 2, LEG_R_BASE * 2];
++  // Footprint must reflect the mast's real ground extent for city layout spacing — the
++  // guy-wire anchors reach out to `anchorDist` on all 3 sides, well past the lattice legs.
++  group.userData.footprint = [anchorDist * 2, anchorDist * 2];
+   group.userData.beacons = [beacons, strobe];
+   return group;
+ }
+ 
+ // ---------------------------------------------------------------------------------
+ // (b) Monument
+ // ---------------------------------------------------------------------------------
+ 
+ const MONUMENT_H = 22;
+ 
+@@ -305,67 +309,87 @@ function makePlaqueTexture(): THREE.CanvasTexture {
+  */
+ export function buildMonument(rng: Rng): THREE.Group {
+   const group = new THREE.Group();
+   group.name = 'monument';
+ 
+   const bodyParts: GeometryPart[] = [];
+   const amberParts: GeometryPart[] = [];
+   const plaqueParts: GeometryPart[] = [];
+   const trimParts: GeometryPart[] = [];
+ 
++  // --- rng-driven variety (round-3 fix: monuments were all identical since `rng` was
++  // unused). Plinth proportions, the figure's stride/pose, and the up-light color all
++  // vary per-instance while keeping the tested footprint/roofY contracts fixed (plinthW/
++  // plinthD stay 8x8, MONUMENT_H stays 22).
++  const strideAmp = rng.range(0.85, 1.2); // how pronounced the stride/lean reads
++  const rearLegAngle = rng.range(0.1, 0.26);
++  const frontLegAngle = rng.range(-0.4, -0.24);
++  const torsoLean = rng.range(-0.22, -0.1);
++  const armSwing = rng.range(0.4, 0.62);
++  const headTilt = rng.range(-0.16, -0.05);
++  const uplightColor = rng.chance(0.5) ? COLORS.sodiumAmber : COLORS.holoTeal;
++
+   // --- Stone plinth: 2-tier base.
+   const plinthW = 8;
+   const plinthD = 8;
+   const plinthH = 3;
+   bodyParts.push(boxPart(new THREE.Vector3(0, plinthH / 2, 0), new THREE.Vector3(plinthW, plinthH, plinthD)));
+   const plinth2W = plinthW * 0.72;
+-  const plinth2H = 1.6;
++  const plinth2H = rng.range(1.3, 1.9);
+   bodyParts.push(
+     boxPart(new THREE.Vector3(0, plinthH + plinth2H / 2, 0), new THREE.Vector3(plinth2W, plinth2H, plinth2W))
+   );
+   const baseTop = plinthH + plinth2H;
+ 
+   // --- Abstract angular striding figure: stacked rotated boxes. Legs (mid-stride —
+   // one forward, one back), torso leaning into the stride, angled shoulders/head.
+   const figH = MONUMENT_H - baseTop - 2; // leave room for halo above the head
+   const legH = figH * 0.42;
+   const torsoH = figH * 0.38;
+   const headH = figH * 0.14;
+   const y0 = baseTop;
+ 
+   // Rear leg (planted, slight backward lean).
+   bodyParts.push(
+-    boxPart(new THREE.Vector3(-0.6, y0 + legH / 2, -0.9), new THREE.Vector3(0.9, legH, 0.7), 0.18)
++    boxPart(
++      new THREE.Vector3(-0.6 * strideAmp, y0 + legH / 2, -0.9 * strideAmp),
++      new THREE.Vector3(0.9, legH, 0.7),
++      rearLegAngle
++    )
+   );
+   // Front leg (striding forward, more forward lean + wider stance).
+   bodyParts.push(
+-    boxPart(new THREE.Vector3(0.9, y0 + legH * 0.46, 1.1), new THREE.Vector3(0.85, legH * 0.95, 0.7), -0.32)
++    boxPart(
++      new THREE.Vector3(0.9 * strideAmp, y0 + legH * 0.46, 1.1 * strideAmp),
++      new THREE.Vector3(0.85, legH * 0.95, 0.7),
++      frontLegAngle
++    )
+   );
+ 
+   // Torso — leans forward into the stride, offset toward the front leg.
+   const torsoY = y0 + legH * 0.85 + torsoH / 2;
+   bodyParts.push(
+-    boxPart(new THREE.Vector3(0.25, torsoY, 0.15), new THREE.Vector3(1.6, torsoH, 1.1), -0.16)
++    boxPart(new THREE.Vector3(0.25, torsoY, 0.15), new THREE.Vector3(1.6, torsoH, 1.1), torsoLean)
+   );
+   // Chest plate accent (slightly rotated for an angular "armor" read).
+   bodyParts.push(
+-    boxPart(new THREE.Vector3(0.35, torsoY + torsoH * 0.15, 0.55), new THREE.Vector3(1.1, torsoH * 0.5, 0.3), -0.1)
++    boxPart(new THREE.Vector3(0.35, torsoY + torsoH * 0.15, 0.55), new THREE.Vector3(1.1, torsoH * 0.5, 0.3), torsoLean * 0.6)
+   );
+ 
+   // Arms — one swung back, one forward, both angular slabs.
+   const armY = torsoY + torsoH * 0.18;
+-  bodyParts.push(boxPart(new THREE.Vector3(-1.1, armY, -0.5), new THREE.Vector3(0.4, torsoH * 0.8, 0.4), 0.5));
+-  bodyParts.push(boxPart(new THREE.Vector3(1.15, armY - torsoH * 0.1, 0.9), new THREE.Vector3(0.4, torsoH * 0.65, 0.4), -0.6));
++  bodyParts.push(boxPart(new THREE.Vector3(-1.1, armY, -0.5), new THREE.Vector3(0.4, torsoH * 0.8, 0.4), armSwing));
++  bodyParts.push(boxPart(new THREE.Vector3(1.15, armY - torsoH * 0.1, 0.9), new THREE.Vector3(0.4, torsoH * 0.65, 0.4), -armSwing * 1.2));
+ 
+   // Head — small angular block atop the torso, tilted up as if striding into the wind.
+   const headY = torsoY + torsoH / 2 + headH / 2 + 0.1;
+-  bodyParts.push(boxPart(new THREE.Vector3(0.3, headY, 0.25), new THREE.Vector3(0.7, headH, 0.7), -0.1));
++  bodyParts.push(boxPart(new THREE.Vector3(0.3, headY, 0.25), new THREE.Vector3(0.7, headH, 0.7), headTilt));
+ 
+   // Round-2 detail (SAW: the stacked-box figure is a featureless silhouette with no
+   // sense of its angular joints): thin teal seam lights trace the torso/chest and
+   // shoulder-to-head "joints" — holographic inlay circuitry rather than literal seams,
+   // consistent with the halo's teal so the whole figure reads as a lit installation.
+   trimParts.push(
+     boxPart(new THREE.Vector3(0.3, torsoY - torsoH * 0.42, 0.2), new THREE.Vector3(1.0, 0.05, 0.05), -0.16),
+     boxPart(new THREE.Vector3(0.28, torsoY + torsoH * 0.42, 0.6), new THREE.Vector3(0.9, 0.05, 0.05), -0.16),
+     boxPart(new THREE.Vector3(0.3, headY - headH * 0.4, 0.28), new THREE.Vector3(0.55, 0.04, 0.55), -0.1)
+   );
+@@ -416,33 +440,32 @@ export function buildMonument(rng: Rng): THREE.Group {
+   const haloGeom = new THREE.TorusGeometry(1.1, 0.1, 6, 48);
+   haloGeom.rotateX(Math.PI / 2);
+   const halo = new THREE.Mesh(haloGeom, makeGlowMat(COLORS.holoTeal, 2.6));
+   halo.name = 'halo';
+   const haloHolder = new THREE.Group();
+   haloHolder.position.set(0.3, headTopY + 1.2, 0.25);
+   haloHolder.rotation.x = 0.12;
+   haloHolder.add(halo);
+ 
+   group.add(mergeOne(bodyParts, new THREE.MeshStandardMaterial({ color: 0x4a463e, roughness: 0.9, metalness: 0.08 }), 'body'));
+-  group.add(mergeOne(amberParts, makeGlowMat(COLORS.sodiumAmber, 2.4), 'uplights'));
++  group.add(mergeOne(amberParts, makeGlowMat(uplightColor, 2.4), 'uplights'));
+   group.add(mergeOne(trimParts, makeGlowMat(COLORS.holoTeal, 2.0), 'trim'));
+   group.add(
+     mergeOne(
+       plaqueParts,
+       new THREE.MeshStandardMaterial({
+         color: 0x000000,
+         emissive: 0xffffff,
+         emissiveMap: plaqueTex,
+         emissiveIntensity: 1.4,
+         roughness: 0.9
+       }),
+       'plaque'
+     )
+   );
+   group.add(haloHolder);
+ 
+   group.userData.roofY = MONUMENT_H;
+   group.userData.footprint = [plinthW, plinthD];
+   group.userData.halo = halo;
+-  void rng;
+   return group;
+ }
+diff --git a/tests/skinnyRoof.test.ts b/tests/skinnyRoof.test.ts
+index f08004c..43a678a 100644
+--- a/tests/skinnyRoof.test.ts
++++ b/tests/skinnyRoof.test.ts
+@@ -105,23 +105,70 @@ describe('decorateRoof', () => {
+       // every child must stay within the +/- w/2, +/- d/2 footprint (small epsilon for
+       // wall thickness / parapet overhang).
+       const eps = 0.6;
+       expect(box.min.x).toBeGreaterThanOrEqual(-w / 2 - eps);
+       expect(box.max.x).toBeLessThanOrEqual(w / 2 + eps);
+       expect(box.min.z).toBeGreaterThanOrEqual(-d / 2 - eps);
+       expect(box.max.z).toBeLessThanOrEqual(d / 2 + eps);
+     });
+   }
+ 
+-  it('keeps a tight draw-call budget (<=3) regardless of item count', () => {
++  it('keeps a tight draw-call budget (<=2 merged buckets + one mesh per vent fan)', () => {
+     const group = decorateRoof({ y: 0, w: 40, d: 24 }, makeRng(2));
+-    expect(countDrawCalls(group)).toBeLessThanOrEqual(3);
++    const fans = group.userData.fans as THREE.Mesh[];
++    expect(Array.isArray(fans)).toBe(true);
++    // body + glow are always-merged buckets (parapet rail / puddle sheen guarantee both
++    // are non-empty), so total draw calls = 2 merged buckets + one small mesh per fan.
++    expect(countDrawCalls(group)).toBe(2 + fans.length);
++  });
++
++  it('spins each fan around its own hub, not the roof origin', () => {
++    // Use a handful of seeds to find one that actually packs a vent unit (fans are only
++    // present when the rng picks a 'vent' item).
++    let group: THREE.Group | undefined;
++    let fans: THREE.Mesh[] = [];
++    for (let seed = 0; seed < 30; seed++) {
++      const g = decorateRoof({ y: 0, w: 40, d: 24 }, makeRng(seed));
++      const f = g.userData.fans as THREE.Mesh[];
++      if (f.length > 0) {
++        group = g;
++        fans = f;
++        break;
++      }
++    }
++    expect(group).toBeDefined();
++    expect(fans.length).toBeGreaterThan(0);
++
++    for (const fan of fans) {
++      // Each fan mesh must be its own (non-merged) mesh, not baked into a shared buffer.
++      expect(fan.isMesh).toBe(true);
++
++      // The fan's geometry must be centered on the mesh's own local origin (not baked
++      // with a translation into vertex positions) — otherwise rotating it around its own
++      // Y axis would orbit it around the hub instead of spinning in place. (The 5-sided
++      // CylinderGeometry's bounding box isn't perfectly symmetric about its axis, so we
++      // allow a small tolerance rather than requiring an exact zero.)
++      fan.geometry.computeBoundingBox();
++      const localCenter = new THREE.Vector3();
++      fan.geometry.boundingBox!.getCenter(localCenter);
++      expect(localCenter.length()).toBeLessThan(0.1);
++
++      // The mesh's own position (its rotation pivot) should sit at its vent's hub, i.e.
++      // away from the roof origin for an off-center vent — confirming the fan doesn't
++      // spin around (0,0,0) like the pre-fix merged mesh did.
++      const before = fan.position.clone();
++      fan.rotation.y = 1.7;
++      fan.updateMatrixWorld(true);
++      const worldPos = new THREE.Vector3();
++      fan.getWorldPosition(worldPos);
++      expect(worldPos.distanceTo(before)).toBeLessThan(1e-6);
++    }
+   });
+ 
+   it('reserves the center slot when opts.billboard is set', () => {
+     const roof = { y: 0, w: 20, d: 20 };
+     const withBillboard = decorateRoof(roof, makeRng(4), { billboard: true });
+     // The billboard frame's glow panel should be present near the roof center; sanity
+     // check by confirming the group still builds without throwing and stays in bounds.
+     const box = new THREE.Box3().setFromObject(withBillboard);
+     expect(box.min.x).toBeGreaterThanOrEqual(-roof.w / 2 - 1);
+     expect(box.max.x).toBeLessThanOrEqual(roof.w / 2 + 1);

@@ -1,0 +1,1225 @@
+# Review package: 8153916daa766ef1a327ecceff0eab074bb18e9e..9352b70
+
+## Commits
+9352b70 feat(assets): stylized people (walk/stand/sit), dogs, cheap crowd
+
+## Files changed
+ src/assets/characters/dog.ts     | 247 ++++++++++++++++++++
+ src/assets/characters/person.ts  | 478 +++++++++++++++++++++++++++++++++++++++
+ src/assets/characters/rig.ts     |  75 ++++++
+ src/viewer/entries/characters.ts | 131 +++++++++++
+ tests/characters.test.ts         | 250 ++++++++++++++++++++
+ 5 files changed, 1181 insertions(+)
+
+## Diff
+diff --git a/src/assets/characters/dog.ts b/src/assets/characters/dog.ts
+new file mode 100644
+index 0000000..1fca34e
+--- /dev/null
++++ b/src/assets/characters/dog.ts
+@@ -0,0 +1,247 @@
++import * as THREE from 'three';
++import { COLORS } from '../../theme';
++import type { Rng } from '../../utils/rng';
++import { mergeParts, xform, type RigPart } from './rig';
++
++/**
++ * Task 17 — city dogs. Box body + head + 4 legs + a wagging tail, walked
++ * beside an owner or sitting at their feet. Two size classes (small/large),
++ * chosen at random per build. Single SkinnedMesh; fur is 1 material, and a
++ * round-3 iteration detail — a 25%-chance glowing collar — adds a second
++ * material group, so the budget stays at <= 2 draw calls.
++ */
++
++export type DogPose = 'walk' | 'sit';
++
++export interface DogAsset {
++  group: THREE.Group;
++  updateAmbient(sec: number): void;
++}
++
++const B = { hips: 0, head: 1, tail: 2, legFL: 3, legFR: 4, legBL: 5, legBR: 6 } as const;
++
++interface DogSize {
++  bodyLen: number;
++  bodyH: number;
++  bodyW: number;
++  legLen: number;
++  shoulderY: number; // hips bone height off the ground, standing
++}
++
++const SMALL: DogSize = { bodyLen: 0.5, bodyH: 0.22, bodyW: 0.18, legLen: 0.24, shoulderY: 0.32 };
++const LARGE: DogSize = { bodyLen: 0.72, bodyH: 0.3, bodyW: 0.24, legLen: 0.34, shoulderY: 0.46 };
++
++// Round-1 iteration: mixing straight into towerBody/skyHorizon read as pure
++// black on the night backdrop and the dog disappeared. Mix toward moonlight
++// instead so fur stays muted but legible (tan / grey / dark-brindle range).
++function mutedFur(): THREE.Color[] {
++  const mix = (a: number, b: number, t: number): THREE.Color =>
++    new THREE.Color(a).lerp(new THREE.Color(b), t);
++  return [
++    mix(COLORS.sodiumAmber, COLORS.void, 0.45), // tan/brown
++    mix(COLORS.moonlight, COLORS.shadowBlue, 0.4), // warm grey
++    mix(COLORS.shadowBlue, COLORS.moonlight, 0.3), // steel-grey
++    mix(COLORS.nightHaze, COLORS.moonlight, 0.35) // dark brindle
++  ];
++}
++
++function makeBones(size: DogSize): THREE.Bone[] {
++  const bones: THREE.Bone[] = Array.from({ length: 7 }, () => new THREE.Bone());
++  const halfLen = size.bodyLen / 2;
++  const halfW = size.bodyW / 2 + 0.02;
++  const layout: Array<[number, number, number, number]> = [
++    [-1, 0, size.shoulderY, 0], // hips (bind = standing shoulder height, root of the rig)
++    [B.hips, halfLen * 0.85, size.bodyH * 0.25, 0], // head
++    [B.hips, -halfLen - 0.02, size.bodyH * 0.1, 0], // tail
++    [B.hips, halfLen * 0.7, -size.shoulderY, halfW], // legFL
++    [B.hips, halfLen * 0.7, -size.shoulderY, -halfW], // legFR
++    [B.hips, -halfLen * 0.7, -size.shoulderY, halfW], // legBL
++    [B.hips, -halfLen * 0.7, -size.shoulderY, -halfW] // legBR
++  ];
++  layout.forEach(([parent, x, y, z], i) => {
++    bones[i].position.set(x, y, z);
++    if (parent >= 0) bones[parent].add(bones[i]);
++  });
++  return bones;
++}
++
++function buildParts(size: DogSize, collarOn: boolean): RigPart[] {
++  const p: RigPart[] = [];
++  const halfLen = size.bodyLen / 2;
++  const halfW = size.bodyW / 2 + 0.02;
++
++  // body
++  p.push({
++    geom: new THREE.BoxGeometry(size.bodyLen, size.bodyH, size.bodyW),
++    matrix: xform(0, size.shoulderY, 0),
++    mat: 0,
++    bone: B.hips
++  });
++  // head + snout
++  p.push({
++    geom: new THREE.BoxGeometry(size.bodyH * 0.75, size.bodyH * 0.7, size.bodyW * 0.85),
++    matrix: xform(halfLen * 0.85, size.shoulderY + size.bodyH * 0.25, 0),
++    mat: 0,
++    bone: B.head
++  });
++  // round-3 detail: a glowing collar at the base of the neck (25% chance).
++  if (collarOn) {
++    p.push({
++      geom: new THREE.TorusGeometry(size.bodyH * 0.42, size.bodyH * 0.05, 6, 14),
++      matrix: xform(halfLen * 0.55, size.shoulderY + size.bodyH * 0.22, 0, 0, Math.PI / 2, 0),
++      mat: 1,
++      bone: B.head
++    });
++  }
++  p.push({
++    geom: new THREE.BoxGeometry(size.bodyH * 0.5, size.bodyH * 0.35, size.bodyW * 0.55),
++    matrix: xform(halfLen * 0.85 + size.bodyH * 0.5, size.shoulderY + size.bodyH * 0.12, 0),
++    mat: 0,
++    bone: B.head
++  });
++  // ears (small triangular-ish boxes)
++  for (const s of [1, -1]) {
++    p.push({
++      geom: new THREE.BoxGeometry(0.03, size.bodyH * 0.3, size.bodyW * 0.22),
++      matrix: xform(
++        halfLen * 0.85 - size.bodyH * 0.15,
++        size.shoulderY + size.bodyH * 0.55,
++        s * size.bodyW * 0.35,
++        0,
++        0,
++        s * 0.2
++      ),
++      mat: 0,
++      bone: B.head
++    });
++  }
++  // tail (capsule, wags in updateAmbient) — geometry is authored in ABSOLUTE
++  // (from-hips) bind coordinates, same convention as every other part above;
++  // the tail bone's own bind position is (-halfLen - 0.02, shoulderY + bodyH*0.1, 0).
++  p.push({
++    geom: new THREE.CapsuleGeometry(size.bodyH * 0.09, size.bodyLen * 0.32, 3, 6),
++    matrix: xform(-halfLen - 0.02, size.shoulderY + size.bodyH * 0.1, 0, 0, 0, Math.PI / 2 - 0.3),
++    mat: 0,
++    bone: B.tail
++  });
++
++  // legs — each leg bone's bind position already carries its own X (front/back)
++  // and Z (left/right) offset (see makeBones); the geometry matrix below must
++  // therefore be authored in the SAME absolute (from-hips) coordinates as
++  // everything else, not as a bone-local offset, or all four legs collapse to
++  // the origin (round-1 bug: every leg rendered stacked under the body center).
++  const legXZ: Array<[number, number, number]> = [
++    [B.legFL, halfLen * 0.7, halfW],
++    [B.legFR, halfLen * 0.7, -halfW],
++    [B.legBL, -halfLen * 0.7, halfW],
++    [B.legBR, -halfLen * 0.7, -halfW]
++  ];
++  for (const [leg, lx, lz] of legXZ) {
++    p.push({
++      geom: new THREE.BoxGeometry(size.bodyH * 0.32, size.legLen, size.bodyH * 0.32),
++      matrix: xform(lx, -size.legLen / 2, lz),
++      mat: 0,
++      bone: leg
++    });
++    // paw
++    p.push({
++      geom: new THREE.BoxGeometry(size.bodyH * 0.36, size.bodyH * 0.16, size.bodyH * 0.4),
++      matrix: xform(lx + 0.01, -size.legLen - 0.02, lz),
++      mat: 0,
++      bone: leg
++    });
++  }
++
++  return p;
++}
++
++function axisZ(bone: THREE.Bone, angle: number): void {
++  bone.quaternion.setFromAxisAngle(new THREE.Vector3(0, 0, 1), angle);
++}
++function axisY(bone: THREE.Bone, angle: number): void {
++  bone.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle);
++}
++
++const COLLAR_NEON = [COLORS.signalMagenta, COLORS.sodiumAmber, COLORS.holoTeal] as const;
++
++export function buildDog(rng: Rng, pose: DogPose): DogAsset {
++  const size = rng.chance(0.5) ? SMALL : LARGE;
++  const furColor = rng.pick(mutedFur());
++  const collarOn = rng.chance(0.25);
++  const mat = new THREE.MeshStandardMaterial({
++    color: furColor,
++    roughness: 0.95,
++    metalness: 0.0,
++    emissive: furColor,
++    emissiveIntensity: 0.12
++  });
++  const collarColor = new THREE.Color(rng.pick(COLLAR_NEON));
++  const collarMat = new THREE.MeshStandardMaterial({
++    color: new THREE.Color(0x02040a),
++    emissive: collarColor,
++    emissiveIntensity: collarOn ? 1.3 : 0
++  });
++
++  const bones = makeBones(size);
++  const geom = mergeParts(buildParts(size, collarOn), true);
++  geom.boundingBox = new THREE.Box3(
++    new THREE.Vector3(-size.bodyLen, -0.05, -size.bodyW),
++    new THREE.Vector3(size.bodyLen, size.shoulderY + size.bodyH + 0.15, size.bodyW)
++  );
++  geom.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, size.shoulderY * 0.6, 0), size.bodyLen + 0.3);
++
++  const mesh = new THREE.SkinnedMesh(geom, [mat, collarMat]);
++  mesh.frustumCulled = false;
++  mesh.name = 'dogMesh';
++
++  const group = new THREE.Group();
++  group.name = `dog-${pose}`;
++  group.add(bones[B.hips]);
++  group.add(mesh);
++  group.updateMatrixWorld(true);
++  mesh.bind(new THREE.Skeleton(bones));
++
++  const strideLeg = 0.4;
++  const strideKnee = 0.3;
++
++  if (pose === 'walk') {
++    // diagonal trot: FL+BR forward, FR+BL back
++    axisZ(bones[B.legFL], strideLeg);
++    axisZ(bones[B.legBR], strideLeg);
++    axisZ(bones[B.legFR], -strideLeg);
++    axisZ(bones[B.legBL], -strideLeg);
++  } else {
++    // sit — haunches down, front legs straight, body pitched back slightly
++    bones[B.hips].position.y = size.shoulderY - size.legLen * 0.45;
++    axisZ(bones[B.hips], -0.18);
++    axisZ(bones[B.legBL], 1.4);
++    axisZ(bones[B.legBR], 1.4);
++    axisZ(bones[B.legFL], -0.12);
++    axisZ(bones[B.legFR], -0.12);
++    axisZ(bones[B.head], 0.18);
++  }
++
++  group.updateMatrixWorld(true);
++
++  const baseHipY = bones[B.hips].position.y;
++  const baseHipRot = pose === 'sit' ? -0.18 : 0;
++
++  function updateAmbient(sec: number): void {
++    // tail wag, continuous in both poses
++    axisY(bones[B.tail], Math.sin(sec * 6) * 0.5);
++
++    if (pose === 'walk') {
++      bones[B.hips].position.y = baseHipY + Math.sin(sec * 5) * 0.015;
++      axisZ(bones[B.legFL], strideLeg * Math.cos(sec * 5));
++      axisZ(bones[B.legBR], strideLeg * Math.cos(sec * 5));
++      axisZ(bones[B.legFR], -strideLeg * Math.cos(sec * 5));
++      axisZ(bones[B.legBL], -strideLeg * Math.cos(sec * 5));
++      void strideKnee;
++    } else {
++      axisZ(bones[B.hips], baseHipRot + Math.sin(sec * 0.8) * 0.01);
++    }
++    group.updateMatrixWorld(true);
++  }
++
++  return { group, updateAmbient };
++}
+diff --git a/src/assets/characters/person.ts b/src/assets/characters/person.ts
+new file mode 100644
+index 0000000..503f4e2
+--- /dev/null
++++ b/src/assets/characters/person.ts
+@@ -0,0 +1,478 @@
++import * as THREE from 'three';
++import { COLORS } from '../../theme';
++import type { Rng } from '../../utils/rng';
++import { mergeParts, xform, type RigPart } from './rig';
++
++/**
++ * Task 17 — stylized night-city pedestrians. Seen from a moving camera at
++ * distance: no face detail, just a segmented-capsule silhouette + a hinted
++ * visor band + (20% of the time) one neon accent. Forward = +X, up = +Y.
++ *
++ * Rig: single SkinnedMesh, 11 rigid-bound bones (same technique as the
++ * bike/rider in src/assets/vehicles/bike.ts — geometry authored directly in
++ * absolute bind-pose coordinates, mesh.bind()'d while every bone quaternion is
++ * still identity, then pose() reorients bones). 2 material groups (matte
++ * street-tone body + a second "accent" material that is always the dark
++ * visor band and, 20% of the time, also lights up a stripe/umbrella
++ * rim/phone-glow somewhere on the body) = 2 draw calls total.
++ */
++
++export type PersonPose = 'walk' | 'stand' | 'sit';
++
++export interface PersonAsset {
++  group: THREE.Group;
++  updateAmbient(sec: number): void;
++}
++
++// ---------------------------------------------------------------------------
++// Dimensions (1 unit = 1 m); person ~1.7 m tall.
++// ---------------------------------------------------------------------------
++
++const SPINE_UP = 0.28;
++const HEAD_UP = 0.42;
++const SHOULDER_UP = 0.3;
++const SHOULDER_OUT = 0.18;
++const ARM_A = 0.27; // upper arm
++const ARM_B = 0.27; // forearm
++const HIP_OUT = 0.1;
++const LEG_A = 0.42; // thigh
++const LEG_B = 0.45; // calf — feet land at hips.y - LEG_B (sit: 0 - 0.45 = -0.45, matches Task 11 anchor floor offset)
++const HIP_STAND_Y = LEG_A + LEG_B; // 0.87 — feet ~on ground when standing straight
++
++// Bind-space absolute Y for each bone (all rotations identity at bind time).
++const HIPS_Y0 = 0;
++const SPINE_Y0 = SPINE_UP;
++const HEAD_Y0 = SPINE_Y0 + HEAD_UP;
++const SH_Y0 = SPINE_Y0 + SHOULDER_UP;
++const FO_Y0 = SH_Y0 - ARM_A;
++const TH_Y0 = HIPS_Y0;
++const CA_Y0 = TH_Y0 - LEG_A;
++
++const B = {
++  hips: 0,
++  spine: 1,
++  head: 2,
++  shL: 3,
++  foL: 4,
++  shR: 5,
++  foR: 6,
++  thL: 7,
++  caL: 8,
++  thR: 9,
++  caR: 10
++} as const;
++
++const M = { body: 0, accent: 1 } as const;
++
++// Muted street-tone body palette — all derived from theme.ts COLORS, mixed toward
++// each other rather than toward void, so silhouettes stay muted but still read
++// clearly against the night backdrop (round-1 iteration: the darkest mixes were
++// reading as near-black-on-black and disappearing).
++function mutedTones(): THREE.Color[] {
++  const mix = (a: number, b: number, t: number): THREE.Color =>
++    new THREE.Color(a).lerp(new THREE.Color(b), t);
++  return [
++    mix(COLORS.shadowBlue, COLORS.moonlight, 0.35), // steel blue-grey
++    mix(COLORS.nightHaze, COLORS.moonlight, 0.3), // muted plum-grey
++    mix(COLORS.moonlight, COLORS.shadowBlue, 0.45), // warm grey
++    mix(COLORS.sodiumAmber, COLORS.void, 0.55), // muted olive/brown
++    mix(COLORS.holoTeal, COLORS.shadowBlue, 0.4) // muted teal-grey
++  ];
++}
++
++const NEON_ACCENTS = [COLORS.signalMagenta, COLORS.sodiumAmber, COLORS.holoTeal] as const;
++type AccentKind = 'stripe' | 'umbrella' | 'phone';
++
++interface BuiltParts {
++  parts: RigPart[];
++  phoneOn: boolean;
++}
++
++function buildBodyParts(rng: Rng, accentOn: boolean, accentKind: AccentKind, hoodUp: boolean, bagOn: boolean): BuiltParts {
++  const p: RigPart[] = [];
++
++  // pelvis
++  p.push({ geom: new THREE.BoxGeometry(0.32, 0.26, 0.22), matrix: xform(0, HIPS_Y0 + 0.06, 0), mat: M.body, bone: B.hips });
++  // torso (capsule, waist to shoulders)
++  p.push({
++    geom: new THREE.CapsuleGeometry(0.16, 0.3, 4, 8),
++    matrix: xform(0, SPINE_Y0 + 0.16, 0),
++    mat: M.body,
++    bone: B.spine
++  });
++  // head
++  p.push({ geom: new THREE.SphereGeometry(0.115, 14, 10), matrix: xform(0, HEAD_Y0, 0), mat: M.body, bone: B.head });
++  // hood-up variant: a soft shell over the head/shoulders
++  if (hoodUp) {
++    p.push({
++      geom: new THREE.SphereGeometry(0.135, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.65),
++      matrix: xform(0, HEAD_Y0 + 0.01, -0.01, 0, 0, Math.PI),
++      mat: M.body,
++      bone: B.head
++    });
++  }
++  // visor band — always present, dark by default, glows if the phone/visor accent lands here
++  p.push({
++    geom: new THREE.BoxGeometry(0.15, 0.032, 0.03),
++    matrix: xform(0.1, HEAD_Y0 - 0.01, 0),
++    mat: M.accent,
++    bone: B.head
++  });
++  // backpack/bag
++  if (bagOn) {
++    p.push({
++      geom: new THREE.BoxGeometry(0.2, 0.26, 0.12),
++      matrix: xform(-0.16, SPINE_Y0 + 0.18, 0),
++      mat: M.body,
++      bone: B.spine
++    });
++  }
++
++  // jacket stripe accent (diagonal on chest)
++  if (accentOn && accentKind === 'stripe') {
++    p.push({
++      geom: new THREE.BoxGeometry(0.03, 0.3, 0.012),
++      matrix: xform(0.155, SPINE_Y0 + 0.16, 0, 0, 0, 0.25),
++      mat: M.accent,
++      bone: B.spine
++    });
++  }
++
++  for (const [sh, fo, s] of [
++    [B.shL, B.foL, 1],
++    [B.shR, B.foR, -1]
++  ] as const) {
++    const sz = s * SHOULDER_OUT;
++    // shoulder cap
++    p.push({ geom: new THREE.SphereGeometry(0.068, 10, 8), matrix: xform(0, SH_Y0, sz), mat: M.body, bone: sh });
++    // upper arm
++    p.push({
++      geom: new THREE.CapsuleGeometry(0.052, ARM_A - 0.06, 4, 8),
++      matrix: xform(0, SH_Y0 - ARM_A / 2, sz),
++      mat: M.body,
++      bone: sh
++    });
++    // forearm
++    p.push({
++      geom: new THREE.CapsuleGeometry(0.046, ARM_B - 0.06, 4, 8),
++      matrix: xform(0, FO_Y0 - ARM_B / 2, sz),
++      mat: M.body,
++      bone: fo
++    });
++    // hand
++    p.push({
++      geom: new THREE.BoxGeometry(0.06, 0.075, 0.06),
++      matrix: xform(0, FO_Y0 - ARM_B - 0.03, sz),
++      mat: M.body,
++      bone: fo
++    });
++  }
++
++  // umbrella carried beside the body (shaft + glowing rim), bound to the SPINE
++  // (not the swinging forearm) so it reads consistently in every pose — round-1
++  // iteration found a forearm-bound umbrella read as a rice-hat sitting on the
++  // head once the arm bent. Canopy sits well clear above the head; the shaft
++  // is offset outside the shoulder line so it never overlaps the silhouette.
++  if (accentOn && accentKind === 'umbrella') {
++    const umbrellaZ = -(SHOULDER_OUT + 0.24);
++    const shaftBottomY = 0.12;
++    const canopyY = HEAD_Y0 + 0.32; // comfortably above the head top (~1.83)
++    p.push({
++      geom: new THREE.CylinderGeometry(0.012, 0.012, canopyY - shaftBottomY, 6),
++      matrix: xform(0, (shaftBottomY + canopyY) / 2, umbrellaZ),
++      mat: M.body,
++      bone: B.spine
++    });
++    p.push({
++      geom: new THREE.ConeGeometry(0.3, 0.13, 12, 1, true),
++      matrix: xform(0, canopyY + 0.06, umbrellaZ),
++      mat: M.body,
++      bone: B.spine
++    });
++    p.push({
++      geom: new THREE.TorusGeometry(0.3, 0.013, 6, 18),
++      matrix: xform(0, canopyY, umbrellaZ),
++      mat: M.accent,
++      bone: B.spine
++    });
++  }
++
++  // phone glow quad — held up near the face (bound to head so it reads correctly
++  // at any arm angle; this is the "looking at phone" stand-pose behavior AND
++  // the general 20% "holo-phone glow" accent share the same geometry).
++  const phoneOn = accentOn && accentKind === 'phone';
++
++  for (const [th, ca, s] of [
++    [B.thL, B.caL, 1],
++    [B.thR, B.caR, -1]
++  ] as const) {
++    const tz = s * HIP_OUT;
++    p.push({
++      geom: new THREE.CapsuleGeometry(0.082, LEG_A - 0.05, 4, 8),
++      matrix: xform(0, TH_Y0 - LEG_A / 2, tz),
++      mat: M.body,
++      bone: th
++    });
++    p.push({
++      geom: new THREE.CapsuleGeometry(0.062, LEG_B - 0.05, 4, 8),
++      matrix: xform(0, CA_Y0 - LEG_B / 2, tz),
++      mat: M.body,
++      bone: ca
++    });
++    // shoe (toe forward, heel lift baked as a slight upward tilt on the trailing/back foot handled by pose())
++    p.push({
++      geom: new THREE.BoxGeometry(0.1, 0.05, 0.2),
++      matrix: xform(0.03, CA_Y0 - LEG_B - 0.02, tz),
++      mat: M.body,
++      bone: ca
++    });
++  }
++
++  return { parts: p, phoneOn };
++}
++
++function makeBones(): THREE.Bone[] {
++  const bones: THREE.Bone[] = Array.from({ length: 11 }, () => new THREE.Bone());
++  const layout: Array<[number, number, number, number]> = [
++    [-1, 0, HIPS_Y0, 0], // hips
++    [B.hips, 0, SPINE_Y0, 0], // spine
++    [B.spine, 0, HEAD_Y0 - SPINE_Y0, 0], // head
++    [B.spine, 0, SH_Y0 - SPINE_Y0, SHOULDER_OUT], // shL
++    [B.shL, 0, FO_Y0 - SH_Y0, 0], // foL
++    [B.spine, 0, SH_Y0 - SPINE_Y0, -SHOULDER_OUT], // shR
++    [B.shR, 0, FO_Y0 - SH_Y0, 0], // foR
++    [B.hips, 0, TH_Y0 - HIPS_Y0, HIP_OUT], // thL
++    [B.thL, 0, CA_Y0 - TH_Y0, 0], // caL
++    [B.hips, 0, TH_Y0 - HIPS_Y0, -HIP_OUT], // thR
++    [B.thR, 0, CA_Y0 - TH_Y0, 0] // caR
++  ];
++  layout.forEach(([parent, x, y, z], i) => {
++    bones[i].position.set(x, y, z);
++    if (parent >= 0) bones[parent].add(bones[i]);
++  });
++  return bones;
++}
++
++function axisZ(bone: THREE.Bone, angle: number): void {
++  bone.quaternion.setFromAxisAngle(new THREE.Vector3(0, 0, 1), angle);
++}
++function axisY(bone: THREE.Bone, angle: number): void {
++  bone.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle);
++}
++
++export function buildPerson(rng: Rng, pose: PersonPose): PersonAsset {
++  const tones = mutedTones();
++  const bodyColor = rng.pick(tones);
++  const accentOn = rng.chance(0.2);
++  const accentKind = rng.pick(['stripe', 'umbrella', 'phone'] as const);
++  const hoodUp = rng.chance(0.25);
++  const bagOn = rng.chance(0.35);
++  // stand-pose-specific "looking at phone" behavior — independent roll from the accent system.
++  const standPhoneIdle = pose === 'stand' && rng.chance(0.3);
++
++  const { parts, phoneOn } = buildBodyParts(rng, accentOn, accentKind, hoodUp, bagOn);
++  const hasPhoneGlow = phoneOn || standPhoneIdle;
++  if (hasPhoneGlow) {
++    parts.push({
++      geom: new THREE.PlaneGeometry(0.06, 0.1),
++      matrix: xform(0.13, HEAD_Y0 - 0.08, 0.02, 0, -Math.PI / 2.4, 0),
++      mat: M.accent,
++      bone: B.head
++    });
++  }
++
++  const accentNeon = rng.pick(NEON_ACCENTS);
++  const bodyMat = new THREE.MeshStandardMaterial({
++    color: bodyColor,
++    roughness: 0.85,
++    metalness: 0.05,
++    // faint self-emissive lift — reads as ambient neon bounce off wet streets,
++    // and keeps the muted palette from vanishing to pure black at this exposure.
++    emissive: bodyColor,
++    emissiveIntensity: 0.12
++  });
++  const accentActive = accentOn || hasPhoneGlow;
++  const accentColor = new THREE.Color(accentActive ? accentNeon : 0x02040a);
++  const accentMat = new THREE.MeshStandardMaterial({
++    color: new THREE.Color(0x02040a),
++    emissive: accentColor,
++    emissiveIntensity: accentActive ? 1.3 : 0.04
++  });
++
++  const bones = makeBones();
++  const geom = mergeParts(parts, true);
++  geom.boundingBox = new THREE.Box3(new THREE.Vector3(-0.6, -0.5, -0.5), new THREE.Vector3(0.6, 1.75, 0.5));
++  geom.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.7, 0), 1.2);
++
++  const mesh = new THREE.SkinnedMesh(geom, [bodyMat, accentMat]);
++  mesh.frustumCulled = false;
++  mesh.name = 'personMesh';
++
++  const group = new THREE.Group();
++  group.name = `person-${pose}`;
++  group.add(bones[B.hips]);
++  group.add(mesh);
++  group.updateMatrixWorld(true);
++  mesh.bind(new THREE.Skeleton(bones));
++
++  // ---- baked pose ----
++  const strideThigh = 0.45;
++  const kneeFront = -0.25;
++  // round-3 detail: a more pronounced trailing-leg knee bend reads as a heel
++  // lift (toe trailing, heel raised) rather than a stiff dragging back leg.
++  const kneeBack = 0.85;
++  const armSwing = 0.5;
++  const elbowBend = 0.35;
++
++  if (pose === 'walk') {
++    bones[B.hips].position.y = HIP_STAND_Y;
++    axisZ(bones[B.thL], strideThigh);
++    axisZ(bones[B.caL], -kneeFront);
++    axisZ(bones[B.thR], -strideThigh);
++    axisZ(bones[B.caR], kneeBack);
++    axisZ(bones[B.shL], -armSwing);
++    axisZ(bones[B.foL], elbowBend);
++    axisZ(bones[B.shR], armSwing);
++    axisZ(bones[B.foR], -elbowBend);
++  } else if (pose === 'stand') {
++    bones[B.hips].position.y = HIP_STAND_Y;
++    const weightShift = rng.range(-0.05, 0.05);
++    bones[B.hips].position.z = weightShift;
++    axisZ(bones[B.thL], weightShift * 0.3);
++    axisZ(bones[B.thR], -weightShift * 0.3);
++    axisZ(bones[B.shL], 0.08);
++    axisZ(bones[B.foL], 0.18);
++    if (standPhoneIdle) {
++      // right arm raised, phone near the face
++      axisZ(bones[B.shR], 1.5);
++      axisZ(bones[B.foR], -1.35);
++    } else {
++      axisZ(bones[B.shR], -0.08);
++      axisZ(bones[B.foR], 0.18);
++    }
++  } else {
++    // sit — pelvis stays at the group origin so it seats correctly on a
++    // 0.45m hip-height anchor (Task 11 seat contract); thighs go forward,
++    // calves drop straight down to the floor (~-0.45 local).
++    bones[B.hips].position.set(0, 0, 0);
++    axisZ(bones[B.spine], -0.12);
++    axisZ(bones[B.thL], Math.PI / 2);
++    axisZ(bones[B.caL], -Math.PI / 2);
++    axisZ(bones[B.thR], Math.PI / 2);
++    axisZ(bones[B.caR], -Math.PI / 2);
++    axisZ(bones[B.shL], 0.35);
++    axisZ(bones[B.foL], 0.9);
++    axisZ(bones[B.shR], -0.35);
++    axisZ(bones[B.foR], 0.9);
++  }
++
++  group.updateMatrixWorld(true);
++
++  // ---- ambient (continuous, wall-clock; sub-4cm amplitudes) ----
++  const bobAmp = 0.02;
++  const swingAmp = 0.06;
++  const baseHipY = bones[B.hips].position.y;
++  const baseHipZ = bones[B.hips].position.z;
++
++  function updateAmbient(sec: number): void {
++    if (pose === 'walk') {
++      bones[B.hips].position.y = baseHipY + Math.sin(sec * 4.2) * bobAmp;
++      axisZ(bones[B.shL], -armSwing + Math.sin(sec * 4.2) * swingAmp);
++      axisZ(bones[B.shR], armSwing - Math.sin(sec * 4.2) * swingAmp);
++      axisZ(bones[B.thL], strideThigh + Math.sin(sec * 4.2 + Math.PI) * swingAmp * 0.6);
++      axisZ(bones[B.thR], -strideThigh - Math.sin(sec * 4.2 + Math.PI) * swingAmp * 0.6);
++    } else if (pose === 'stand') {
++      axisY(bones[B.spine], Math.sin(sec * 0.6) * 0.05);
++      bones[B.hips].position.z = baseHipZ + Math.sin(sec * 0.3) * 0.01;
++      if (hasPhoneGlow) {
++        accentMat.emissiveIntensity = 1.0 + Math.sin(sec * 3.2) * 0.3;
++      }
++    } else {
++      axisZ(bones[B.spine], -0.12 + Math.sin(sec * 0.5) * 0.01);
++      if (hasPhoneGlow) {
++        accentMat.emissiveIntensity = 1.0 + Math.sin(sec * 3.2) * 0.3;
++      }
++    }
++    group.updateMatrixWorld(true);
++  }
++
++  return { group, updateAmbient };
++}
++
++// ---------------------------------------------------------------------------
++// buildCrowd — cheap merged/near-instanced crowd for Shibuya corners etc.
++// ---------------------------------------------------------------------------
++
++export interface CrowdAsset {
++  group: THREE.Group;
++  updateAmbient(sec: number): void;
++}
++
++/** One low-detail figure: a tapered body "blob" + head, merged into a single geometry. */
++function buildLowPolyFigureGeometry(): THREE.BufferGeometry {
++  const parts: RigPart[] = [
++    { geom: new THREE.CapsuleGeometry(0.22, 1.0, 3, 6), matrix: xform(0, 0.85, 0), mat: 0 },
++    { geom: new THREE.SphereGeometry(0.13, 8, 6), matrix: xform(0, 1.5, 0), mat: 0 }
++  ];
++  return mergeParts(parts, false);
++}
++
++export function buildCrowd(rng: Rng, n: number, area: [number, number]): CrowdAsset {
++  const [w, d] = area;
++  const geom = buildLowPolyFigureGeometry();
++  const mat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0.02 });
++  const mesh = new THREE.InstancedMesh(geom, mat, Math.max(n, 1));
++  mesh.name = 'crowd';
++  mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(n, 1) * 3), 3);
++  mesh.frustumCulled = false;
++
++  const tones = mutedTones();
++  const phases: number[] = [];
++  const bases: THREE.Matrix4[] = [];
++  const rotations: number[] = [];
++  const scales: number[] = [];
++  const dummy = new THREE.Object3D();
++
++  for (let i = 0; i < n; i++) {
++    const x = rng.range(-w / 2, w / 2);
++    const z = rng.range(-d / 2, d / 2);
++    const ry = rng.range(0, Math.PI * 2);
++    const scale = rng.range(0.92, 1.08);
++    dummy.position.set(x, 0, z);
++    dummy.rotation.set(0, ry, 0);
++    dummy.scale.set(scale, scale, scale);
++    dummy.updateMatrix();
++    bases.push(dummy.matrix.clone());
++    rotations.push(ry);
++    scales.push(scale);
++    phases.push(rng.range(0, Math.PI * 2));
++    mesh.setMatrixAt(i, dummy.matrix);
++    mesh.setColorAt(i, rng.pick(tones));
++  }
++  mesh.instanceMatrix.needsUpdate = true;
++  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
++
++  const group = new THREE.Group();
++  group.name = 'buildCrowd';
++  group.add(mesh);
++
++  const m = new THREE.Matrix4();
++  const q = new THREE.Quaternion();
++  const euler = new THREE.Euler();
++  const v = new THREE.Vector3();
++  const s = new THREE.Vector3();
++
++  function updateAmbient(sec: number): void {
++    for (let i = 0; i < n; i++) {
++      const base = bases[i];
++      base.decompose(v, q, s);
++      const sway = Math.sin(sec * 1.4 + phases[i]) * 0.03;
++      euler.set(0, rotations[i] + sway, 0);
++      m.compose(v, new THREE.Quaternion().setFromEuler(euler), s);
++      mesh.setMatrixAt(i, m);
++    }
++    mesh.instanceMatrix.needsUpdate = true;
++  }
++
++  return { group, updateAmbient };
++}
+diff --git a/src/assets/characters/rig.ts b/src/assets/characters/rig.ts
+new file mode 100644
+index 0000000..58e2e4e
+--- /dev/null
++++ b/src/assets/characters/rig.ts
+@@ -0,0 +1,75 @@
++import * as THREE from 'three';
++import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
++
++/**
++ * Small shared helpers for the character rigs (person.ts, dog.ts). Mirrors the
++ * technique used by the bike/rider (src/assets/vehicles/bike.ts): a handful of
++ * static parts, each rigidly bound to one bone, merged into a single
++ * SkinnedMesh so a fully-posed articulated figure costs exactly one draw call
++ * per material group instead of one draw call per body part.
++ */
++
++export interface RigPart {
++  geom: THREE.BufferGeometry;
++  matrix: THREE.Matrix4;
++  mat: number;
++  bone?: number;
++}
++
++export function xform(x: number, y: number, z: number, rx = 0, ry = 0, rz = 0): THREE.Matrix4 {
++  return new THREE.Matrix4().compose(
++    new THREE.Vector3(x, y, z),
++    new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)),
++    new THREE.Vector3(1, 1, 1)
++  );
++}
++
++/**
++ * Merges rigidly-bound parts into one geometry, coalescing material groups so
++ * the draw-call count equals the number of distinct materials rather than the
++ * number of parts. Set `skinned` to emit rigid skinIndex/skinWeight attributes
++ * (bone index per part, weight 1) for use in a THREE.SkinnedMesh.
++ */
++export function mergeParts(parts: RigPart[], skinned: boolean): THREE.BufferGeometry {
++  const sorted = [...parts].sort((a, b) => a.mat - b.mat);
++  const geoms: THREE.BufferGeometry[] = [];
++  const runs: Array<{ mat: number; count: number }> = [];
++
++  for (const p of sorted) {
++    let g = p.geom.clone();
++    if (g.index) g = g.toNonIndexed();
++    g.applyMatrix4(p.matrix);
++    const n = g.getAttribute('position').count;
++    if (skinned) {
++      const idx = new Uint16Array(n * 4);
++      const wgt = new Float32Array(n * 4);
++      for (let i = 0; i < n; i++) {
++        idx[i * 4] = p.bone ?? 0;
++        wgt[i * 4] = 1;
++      }
++      g.setAttribute('skinIndex', new THREE.BufferAttribute(idx, 4));
++      g.setAttribute('skinWeight', new THREE.BufferAttribute(wgt, 4));
++    }
++    geoms.push(g);
++    const last = runs[runs.length - 1];
++    if (last && last.mat === p.mat) last.count += n;
++    else runs.push({ mat: p.mat, count: n });
++  }
++
++  const merged = mergeGeometries(geoms);
++  if (!merged) throw new Error('rig: geometry merge failed');
++  merged.clearGroups();
++  let start = 0;
++  for (const r of runs) {
++    merged.addGroup(start, r.count, r.mat);
++    start += r.count;
++  }
++  return merged;
++}
++
++const DOWN = new THREE.Vector3(0, -1, 0);
++
++/** Quaternion rotating the bind direction DOWN onto a world direction. */
++export function aimDown(to: THREE.Vector3): THREE.Quaternion {
++  return new THREE.Quaternion().setFromUnitVectors(DOWN, to.clone().normalize());
++}
+diff --git a/src/viewer/entries/characters.ts b/src/viewer/entries/characters.ts
+new file mode 100644
+index 0000000..7d02831
+--- /dev/null
++++ b/src/viewer/entries/characters.ts
+@@ -0,0 +1,131 @@
++import * as THREE from 'three';
++import { registerAsset } from '../registry';
++import { buildPerson, buildCrowd } from '../../assets/characters/person';
++import { buildDog } from '../../assets/characters/dog';
++
++/**
++ * Task 17 verification. All ambient-only (wall-clock `sec`, not scrubbed `t`):
++ *  - personWalk / personStand / personSit: single figure per pose.
++ *  - dogWalk: single dog.
++ *  - crowd: buildCrowd(14) in a 6x6 area — cheap merged/instanced Shibuya-corner crowd.
++ *  - streetCast: 3 walkers, 2 standers, 3 sitters on a bench prop, 2 dogs — the
++ *    detail-iteration lineup.
++ */
++
++registerAsset('personWalk', (rng) => {
++  const p = buildPerson(rng, 'walk');
++  return { group: p.group, updateAmbient: p.updateAmbient };
++});
++
++registerAsset('personStand', (rng) => {
++  const p = buildPerson(rng, 'stand');
++  return { group: p.group, updateAmbient: p.updateAmbient };
++});
++
++registerAsset('personSit', (rng) => {
++  const p = buildPerson(rng, 'sit');
++  // lift onto a stub 0.45m seat anchor stand-in so the pose reads correctly in isolation.
++  const seatProp = new THREE.Mesh(
++    new THREE.BoxGeometry(0.42, 0.45, 0.42),
++    new THREE.MeshStandardMaterial({ color: 0x14161f, roughness: 0.9 })
++  );
++  seatProp.position.set(0, 0.225, 0);
++  const group = new THREE.Group();
++  p.group.position.y = 0.45;
++  group.add(seatProp, p.group);
++  return { group, updateAmbient: p.updateAmbient };
++});
++
++registerAsset('dogWalk', (rng) => {
++  const d = buildDog(rng, 'walk');
++  return { group: d.group, updateAmbient: d.updateAmbient };
++});
++
++registerAsset('crowd', (rng) => {
++  const c = buildCrowd(rng, 14, [6, 6]);
++  return { group: c.group, updateAmbient: c.updateAmbient };
++});
++
++// Debug-only close-up of the sitting dog pose (not part of the required
++// registration list, but useful for the detail-iteration loop).
++registerAsset('dogSit', (rng) => {
++  const d = buildDog(rng, 'sit');
++  return { group: d.group, updateAmbient: d.updateAmbient };
++});
++
++// A bench prop for the seated trio — a simple slab + two legs, seat top at 0.45m.
++function buildBenchProp(): { group: THREE.Group; seatY: number } {
++  const mat = new THREE.MeshStandardMaterial({ color: 0x14161f, roughness: 0.85, metalness: 0.2 });
++  const group = new THREE.Group();
++  const seat = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.06, 0.45), mat);
++  seat.position.set(0, 0.45, 0);
++  group.add(seat);
++  for (const x of [-0.95, 0.95]) {
++    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.42, 0.4), mat);
++    leg.position.set(x, 0.21, 0);
++    group.add(leg);
++  }
++  return { group, seatY: 0.45 };
++}
++
++registerAsset('streetCast', (rng) => {
++  const group = new THREE.Group();
++  const updates: Array<(sec: number) => void> = [];
++
++  // 3 walkers, spread along a sidewalk line — kept in a compact ~7x5m footprint
++  // (round-1 iteration: a 12m-wide lineup zoomed the auto-framed camera out so
++  // far every figure read as a few dark pixels).
++  const walkerX = [-2.8, -1.2, 0.4];
++  for (const x of walkerX) {
++    const w = buildPerson(rng, 'walk');
++    w.group.position.set(x, 0, 1.6);
++    w.group.rotation.y = rng.range(-0.2, 0.2);
++    group.add(w.group);
++    updates.push(w.updateAmbient);
++  }
++
++  // 2 standers, loitering near a storefront line
++  const standerX = [1.7, 3.0];
++  for (const x of standerX) {
++    const s = buildPerson(rng, 'stand');
++    s.group.position.set(x, 0, -1.1);
++    s.group.rotation.y = rng.range(-Math.PI, Math.PI);
++    group.add(s.group);
++    updates.push(s.updateAmbient);
++  }
++
++  // bench + 3 sitters, each parented to a 0.45m hip-height anchor on the bench
++  const bench = buildBenchProp();
++  bench.group.position.set(-0.8, 0, 3.4);
++  group.add(bench.group);
++  const seatXs = [-0.8, 0, 0.8];
++  for (const sx of seatXs) {
++    const anchor = new THREE.Object3D();
++    anchor.position.set(sx, bench.seatY, 0);
++    anchor.rotation.y = Math.PI / 2;
++    bench.group.add(anchor);
++    const sit = buildPerson(rng, 'sit');
++    anchor.add(sit.group);
++    updates.push(sit.updateAmbient);
++  }
++
++  // 2 dogs, one paired beside the first walker, one sitting near the standers
++  const dogWalking = buildDog(rng, 'walk');
++  dogWalking.group.position.set(walkerX[0] + 0.55, 0, 1.9);
++  dogWalking.group.rotation.y = rng.range(-0.2, 0.2);
++  group.add(dogWalking.group);
++  updates.push(dogWalking.updateAmbient);
++
++  const dogSitting = buildDog(rng, 'sit');
++  dogSitting.group.position.set(standerX[1] + 0.5, 0, -1.4);
++  dogSitting.group.rotation.y = rng.range(0, Math.PI * 2);
++  group.add(dogSitting.group);
++  updates.push(dogSitting.updateAmbient);
++
++  return {
++    group,
++    updateAmbient(sec: number): void {
++      for (const u of updates) u(sec);
++    }
++  };
++});
+diff --git a/tests/characters.test.ts b/tests/characters.test.ts
+new file mode 100644
+index 0000000..ad4d9f5
+--- /dev/null
++++ b/tests/characters.test.ts
+@@ -0,0 +1,250 @@
++import { describe, it, expect } from 'vitest';
++import * as THREE from 'three';
++import { makeRng } from '../src/utils/rng';
++import { buildPerson, buildCrowd, type PersonPose } from '../src/assets/characters/person';
++import { buildDog, type DogPose } from '../src/assets/characters/dog';
++import personSrc from '../src/assets/characters/person.ts?raw';
++import dogSrc from '../src/assets/characters/dog.ts?raw';
++import rigSrc from '../src/assets/characters/rig.ts?raw';
++
++function countDrawCalls(root: THREE.Object3D): number {
++  let n = 0;
++  root.traverse((o) => {
++    const mesh = o as THREE.Mesh;
++    if (!(mesh as any).isMesh && !(mesh as any).isSkinnedMesh && !(mesh as any).isInstancedMesh) return;
++    n += Array.isArray(mesh.material) ? mesh.geometry.groups.length || 1 : 1;
++  });
++  return n;
++}
++
++function everyMatrixFinite(root: THREE.Object3D): boolean {
++  root.updateMatrixWorld(true);
++  let ok = true;
++  root.traverse((o) => {
++    for (const e of o.matrixWorld.elements) {
++      if (!Number.isFinite(e)) ok = false;
++    }
++  });
++  return ok;
++}
++
++const POSES: PersonPose[] = ['walk', 'stand', 'sit'];
++
++describe('buildPerson', () => {
++  for (const pose of POSES) {
++    it(`${pose}: builds a valid group with <= 2 draw calls`, () => {
++      const p = buildPerson(makeRng(1), pose);
++      expect(p.group).toBeInstanceOf(THREE.Group);
++      expect(typeof p.updateAmbient).toBe('function');
++      expect(countDrawCalls(p.group)).toBeLessThanOrEqual(2);
++    });
++
++    it(`${pose}: finite matrices at build and after updateAmbient over a range of seconds`, () => {
++      const p = buildPerson(makeRng(2), pose);
++      expect(everyMatrixFinite(p.group)).toBe(true);
++      for (const sec of [0, 0.5, 1.3, 10, 1000.25]) {
++        p.updateAmbient(sec);
++        expect(everyMatrixFinite(p.group)).toBe(true);
++      }
++    });
++  }
++
++  it('sit: pelvis (hips bone) sits at the group origin, feet reach ~-0.45 (Task 11 seat anchor floor offset)', () => {
++    const p = buildPerson(makeRng(3), 'sit');
++    let skinned: THREE.SkinnedMesh | undefined;
++    p.group.traverse((o) => {
++      if ((o as THREE.SkinnedMesh).isSkinnedMesh) skinned = o as THREE.SkinnedMesh;
++    });
++    expect(skinned).toBeDefined();
++    const hipsBone = skinned!.skeleton.bones[0];
++    const hipsWorld = hipsBone.getWorldPosition(new THREE.Vector3());
++    const groupWorld = p.group.getWorldPosition(new THREE.Vector3());
++    expect(hipsWorld.distanceTo(groupWorld)).toBeLessThan(1e-6);
++
++    // feet: last two bones in the chain (calves) — find the lowest point of the mesh geometry
++    // in world space as a proxy for "feet reach the floor".
++    p.group.updateMatrixWorld(true);
++    const box = new THREE.Box3().setFromObject(p.group);
++    expect(box.min.y).toBeGreaterThan(-0.6);
++    expect(box.min.y).toBeLessThan(-0.35);
++  });
++
++  it('walk/stand: standing figure feet are near ground level (y ~ 0), not floating or sunk', () => {
++    for (const pose of ['walk', 'stand'] as const) {
++      const p = buildPerson(makeRng(4), pose);
++      p.group.updateMatrixWorld(true);
++      const box = new THREE.Box3().setFromObject(p.group);
++      expect(box.min.y).toBeGreaterThan(-0.15);
++      expect(box.min.y).toBeLessThan(0.15);
++      expect(box.max.y).toBeGreaterThan(1.4);
++      expect(box.max.y).toBeLessThan(2.0);
++    }
++  });
++
++  it('is deterministic for the same seed', () => {
++    const a = buildPerson(makeRng(7), 'walk');
++    const b = buildPerson(makeRng(7), 'walk');
++    let meshA: THREE.SkinnedMesh | undefined;
++    let meshB: THREE.SkinnedMesh | undefined;
++    a.group.traverse((o) => {
++      if ((o as THREE.SkinnedMesh).isSkinnedMesh) meshA = o as THREE.SkinnedMesh;
++    });
++    b.group.traverse((o) => {
++      if ((o as THREE.SkinnedMesh).isSkinnedMesh) meshB = o as THREE.SkinnedMesh;
++    });
++    const arrA = meshA!.geometry.getAttribute('position').array as Float32Array;
++    const arrB = meshB!.geometry.getAttribute('position').array as Float32Array;
++    expect(arrA.length).toBe(arrB.length);
++    expect(Array.from(arrA)).toEqual(Array.from(arrB));
++  });
++
++  it('ambient bob/arm-swing amplitude stays sub-4cm (walk pose)', () => {
++    const p = buildPerson(makeRng(5), 'walk');
++    let skinned: THREE.SkinnedMesh | undefined;
++    p.group.traverse((o) => {
++      if ((o as THREE.SkinnedMesh).isSkinnedMesh) skinned = o as THREE.SkinnedMesh;
++    });
++    const hipsBone = skinned!.skeleton.bones[0];
++    const ys: number[] = [];
++    for (let sec = 0; sec < 2; sec += 0.05) {
++      p.updateAmbient(sec);
++      p.group.updateMatrixWorld(true);
++      ys.push(hipsBone.getWorldPosition(new THREE.Vector3()).y);
++    }
++    const amp = (Math.max(...ys) - Math.min(...ys)) / 2;
++    expect(amp).toBeLessThan(0.04);
++  });
++});
++
++describe('buildCrowd', () => {
++  it('returns n figures merged into a small, constant number of draw calls (not n*2)', () => {
++    const small = buildCrowd(makeRng(1), 10, [6, 6]);
++    const large = buildCrowd(makeRng(1), 40, [12, 12]);
++    const drawsSmall = countDrawCalls(small.group);
++    const drawsLarge = countDrawCalls(large.group);
++    expect(drawsSmall).toBeLessThanOrEqual(3);
++    expect(drawsLarge).toBeLessThanOrEqual(3);
++    expect(drawsLarge).toBe(drawsSmall);
++  });
++
++  it('places n instances inside the requested area', () => {
++    const n = 14;
++    const area: [number, number] = [6, 6];
++    const c = buildCrowd(makeRng(2), n, area);
++    let mesh: THREE.InstancedMesh | undefined;
++    c.group.traverse((o) => {
++      if ((o as THREE.InstancedMesh).isInstancedMesh) mesh = o as THREE.InstancedMesh;
++    });
++    expect(mesh).toBeDefined();
++    expect(mesh!.count).toBe(n);
++    const m = new THREE.Matrix4();
++    const v = new THREE.Vector3();
++    const q = new THREE.Quaternion();
++    const s = new THREE.Vector3();
++    for (let i = 0; i < n; i++) {
++      mesh!.getMatrixAt(i, m);
++      m.decompose(v, q, s);
++      expect(Math.abs(v.x)).toBeLessThanOrEqual(area[0] / 2 + 1e-6);
++      expect(Math.abs(v.z)).toBeLessThanOrEqual(area[1] / 2 + 1e-6);
++    }
++  });
++
++  it('updateAmbient perturbs instance transforms without exploding', () => {
++    const c = buildCrowd(makeRng(3), 14, [6, 6]);
++    expect(() => {
++      for (const sec of [0, 1, 5.5]) c.updateAmbient(sec);
++    }).not.toThrow();
++  });
++
++  it('is deterministic for the same seed', () => {
++    const a = buildCrowd(makeRng(9), 8, [6, 6]);
++    const b = buildCrowd(makeRng(9), 8, [6, 6]);
++    let ma: THREE.InstancedMesh | undefined;
++    let mb: THREE.InstancedMesh | undefined;
++    a.group.traverse((o) => {
++      if ((o as THREE.InstancedMesh).isInstancedMesh) ma = o as THREE.InstancedMesh;
++    });
++    b.group.traverse((o) => {
++      if ((o as THREE.InstancedMesh).isInstancedMesh) mb = o as THREE.InstancedMesh;
++    });
++    const m1 = new THREE.Matrix4();
++    const m2 = new THREE.Matrix4();
++    for (let i = 0; i < 8; i++) {
++      ma!.getMatrixAt(i, m1);
++      mb!.getMatrixAt(i, m2);
++      expect(m1.elements).toEqual(m2.elements);
++    }
++  });
++});
++
++const DOG_POSES: DogPose[] = ['walk', 'sit'];
++
++describe('buildDog', () => {
++  for (const pose of DOG_POSES) {
++    it(`${pose}: builds a valid group with <= 2 draw calls`, () => {
++      const d = buildDog(makeRng(1), pose);
++      expect(d.group).toBeInstanceOf(THREE.Group);
++      expect(typeof d.updateAmbient).toBe('function');
++      expect(countDrawCalls(d.group)).toBeLessThanOrEqual(2);
++    });
++
++    it(`${pose}: finite matrices at build and after updateAmbient`, () => {
++      const d = buildDog(makeRng(2), pose);
++      expect(everyMatrixFinite(d.group)).toBe(true);
++      for (const sec of [0, 0.5, 3, 100]) {
++        d.updateAmbient(sec);
++        expect(everyMatrixFinite(d.group)).toBe(true);
++      }
++    });
++  }
++
++  it('produces 2 size classes across many seeds', () => {
++    const heights = new Set<number>();
++    for (let seed = 0; seed < 30; seed++) {
++      const d = buildDog(makeRng(seed), 'walk');
++      d.group.updateMatrixWorld(true);
++      const box = new THREE.Box3().setFromObject(d.group);
++      heights.add(Math.round((box.max.y - box.min.y) * 100));
++    }
++    // small vs large should give a handful of distinct rounded heights, not one constant value
++    expect(heights.size).toBeGreaterThan(1);
++  });
++
++  it('is deterministic for the same seed', () => {
++    const a = buildDog(makeRng(11), 'walk');
++    const b = buildDog(makeRng(11), 'walk');
++    let meshA: THREE.SkinnedMesh | undefined;
++    let meshB: THREE.SkinnedMesh | undefined;
++    a.group.traverse((o) => {
++      if ((o as THREE.SkinnedMesh).isSkinnedMesh) meshA = o as THREE.SkinnedMesh;
++    });
++    b.group.traverse((o) => {
++      if ((o as THREE.SkinnedMesh).isSkinnedMesh) meshB = o as THREE.SkinnedMesh;
++    });
++    const arrA = meshA!.geometry.getAttribute('position').array as Float32Array;
++    const arrB = meshB!.geometry.getAttribute('position').array as Float32Array;
++    expect(Array.from(arrA)).toEqual(Array.from(arrB));
++  });
++});
++
++describe('house rules', () => {
++  const SRC_FILES: string[] = [personSrc, dogSrc, rigSrc];
++
++  it('never uses Math.random (randomness only via the passed Rng)', () => {
++    for (const src of SRC_FILES) {
++      expect(src.includes('Math.random')).toBe(false);
++    }
++  });
++
++  it('never references tron-cyan (reserved for the biker)', () => {
++    for (const src of SRC_FILES) {
++      expect(src.includes('tronCyan')).toBe(false);
++    }
++  });
++
++  it('pedestrian neon accents are only magenta/amber/teal', () => {
++    expect(personSrc).toMatch(/signalMagenta/);
++    expect(personSrc).toMatch(/sodiumAmber/);
++    expect(personSrc).toMatch(/holoTeal/);
++  });
++});

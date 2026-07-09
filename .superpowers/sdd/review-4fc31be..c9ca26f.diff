@@ -1,0 +1,281 @@
+# Review package: 4fc31be..HEAD
+
+## Commits
+c9ca26f feat: playwright screenshot harness + asset viewer
+
+## Files changed
+ .gitignore             |   1 +
+ src/env.d.ts           |   5 ++
+ src/main.ts            |  45 ++++++++++++++----
+ src/viewer/registry.ts |  22 +++++++++
+ src/viewer/viewer.ts   | 122 +++++++++++++++++++++++++++++++++++++++++++++++++
+ tools/shoot.mjs        |  18 ++++++++
+ 6 files changed, 203 insertions(+), 10 deletions(-)
+
+## Diff
+diff --git a/.gitignore b/.gitignore
+index 45c1987..45e6341 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,6 +1,7 @@
+ .superpowers/
+ node_modules/
+ dist/
++shots/
+ .env
+ .env.local
+ *.log
+diff --git a/src/env.d.ts b/src/env.d.ts
+index 60de20b..861b6ee 100644
+--- a/src/env.d.ts
++++ b/src/env.d.ts
+@@ -1,5 +1,10 @@
+ /// <reference types="vite/client" />
+ 
+ declare module '@fontsource/unbounded';
+ declare module '@fontsource/rajdhani';
+ declare module '@fontsource/share-tech-mono';
++
++interface Window {
++  /** Set to true after the viewer/screenshot harness renders its first frame. */
++  __READY?: boolean;
++}
+diff --git a/src/main.ts b/src/main.ts
+index e218e52..cdee899 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -1,19 +1,44 @@
+ import '@fontsource/unbounded';
+ import '@fontsource/rajdhani';
+ import '@fontsource/share-tech-mono';
+ import './styles.css';
++import * as THREE from 'three';
+ import { COLORS } from './theme';
++import { registerAsset } from './viewer/registry';
++import { runViewer } from './viewer/viewer';
+ 
+-// Temporary canvas setup
+-const canvas = document.getElementById('stage') as HTMLCanvasElement;
+-if (canvas) {
+-  const ctx = canvas.getContext('2d');
+-  if (ctx) {
+-    canvas.width = window.innerWidth;
+-    canvas.height = window.innerHeight;
+-    ctx.fillStyle = '#' + COLORS.void.toString(16).padStart(6, '0');
+-    ctx.fillRect(0, 0, canvas.width, canvas.height);
++function boot(): void {
++  if (new URLSearchParams(location.search).has('viewer')) {
++    // TEMP: verification asset for Task 2 — delete this block when Phase 2 starts.
++    registerAsset('testCube', () => {
++      const geo = new THREE.BoxGeometry(2, 2, 2);
++      const mat = new THREE.MeshStandardMaterial({
++        color: COLORS.tronCyan,
++        emissive: COLORS.tronCyan,
++        emissiveIntensity: 1.2,
++        metalness: 0.2,
++        roughness: 0.3
++      });
++      return new THREE.Mesh(geo, mat);
++    });
++
++    runViewer();
++    return;
++  }
++
++  // Temporary canvas setup
++  const canvas = document.getElementById('stage') as HTMLCanvasElement;
++  if (canvas) {
++    const ctx = canvas.getContext('2d');
++    if (ctx) {
++      canvas.width = window.innerWidth;
++      canvas.height = window.innerHeight;
++      ctx.fillStyle = '#' + COLORS.void.toString(16).padStart(6, '0');
++      ctx.fillRect(0, 0, canvas.width, canvas.height);
++    }
+   }
++
++  console.log('boot ok');
+ }
+ 
+-console.log('boot ok');
++boot();
+diff --git a/src/viewer/registry.ts b/src/viewer/registry.ts
+new file mode 100644
+index 0000000..69c9d51
+--- /dev/null
++++ b/src/viewer/registry.ts
+@@ -0,0 +1,22 @@
++import type * as THREE from 'three';
++
++// replaced by utils/rng in Task 3
++type Rng = () => number;
++
++export type AssetEntry =
++  | THREE.Object3D
++  | { group: THREE.Object3D; update?: (t: number) => void; updateAmbient?: (sec: number) => void };
++
++const registry = new Map<string, (rng: Rng) => AssetEntry>();
++
++export function registerAsset(name: string, make: (rng: Rng) => AssetEntry): void {
++  registry.set(name, make);
++}
++
++export function getAsset(name: string): ((rng: Rng) => AssetEntry) | undefined {
++  return registry.get(name);
++}
++
++export function listAssets(): string[] {
++  return [...registry.keys()];
++}
+diff --git a/src/viewer/viewer.ts b/src/viewer/viewer.ts
+new file mode 100644
+index 0000000..3c6e508
+--- /dev/null
++++ b/src/viewer/viewer.ts
+@@ -0,0 +1,122 @@
++import * as THREE from 'three';
++import { COLORS } from '../theme';
++import { getAsset, listAssets, type AssetEntry } from './registry';
++
++// replaced by utils/rng in Task 3
++type Rng = () => number;
++
++function mulberry32(seed: number): Rng {
++  let a = seed >>> 0;
++  return function next(): number {
++    a = (a + 0x6d2b79f5) | 0;
++    let t = Math.imul(a ^ (a >>> 15), 1 | a);
++    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
++    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
++  };
++}
++
++function hexColor(n: number): string {
++  return '#' + n.toString(16).padStart(6, '0');
++}
++
++function showMessage(text: string): void {
++  const msg = document.createElement('div');
++  msg.style.cssText =
++    'position:fixed;top:0;left:0;padding:8px 12px;color:#fff;font-family:monospace;font-size:14px;' +
++    `background:${hexColor(COLORS.void)};z-index:10`;
++  msg.textContent = text;
++  document.body.appendChild(msg);
++}
++
++/**
++ * Reads `?viewer=<name>&angle=<0-3>&t=<0..1>` from location.search, builds a minimal
++ * preview scene for the requested registered asset, frames the camera at one of four
++ * orbit angles (45° azimuth steps, 20° elevation), and exposes `window.__READY = true`
++ * once the first frame has been rendered. Bloom composer arrives with core/core.ts in
++ * Task 4 — for now this uses a plain WebGLRenderer.
++ */
++export function runViewer(): void {
++  const params = new URLSearchParams(location.search);
++  const name = params.get('viewer');
++  const angleIndex = Number(params.get('angle') ?? '0');
++  const t = Number(params.get('t') ?? '0.5');
++
++  document.body.innerHTML = '';
++  document.body.style.margin = '0';
++  document.body.style.overflow = 'hidden';
++
++  const renderer = new THREE.WebGLRenderer({ antialias: true });
++  renderer.setPixelRatio(1);
++  renderer.setSize(window.innerWidth, window.innerHeight);
++  document.body.appendChild(renderer.domElement);
++
++  const scene = new THREE.Scene();
++  scene.background = new THREE.Color(COLORS.void);
++
++  const grid = new THREE.GridHelper(40, 40, COLORS.holoTeal, COLORS.shadowBlue);
++  scene.add(grid);
++
++  const hemi = new THREE.HemisphereLight(0xffffff, COLORS.shadowBlue, 1.0);
++  scene.add(hemi);
++
++  const key = new THREE.DirectionalLight(0xffffff, 1.5);
++  key.position.set(5, 8, 5);
++  scene.add(key);
++
++  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 500);
++  camera.position.set(0, 3, 8);
++  camera.lookAt(0, 0, 0);
++
++  if (!name) {
++    showMessage('viewer: missing ?viewer=<name>');
++  } else {
++    const make = getAsset(name);
++    if (!make) {
++      showMessage(`viewer: unknown asset "${name}". registered: ${listAssets().join(', ') || '(none)'}`);
++    } else {
++      const rng = mulberry32(1);
++      const entry: AssetEntry = make(rng);
++      const object = entry instanceof THREE.Object3D ? entry : entry.group;
++      const update = entry instanceof THREE.Object3D ? undefined : entry.update;
++      const updateAmbient = entry instanceof THREE.Object3D ? undefined : entry.updateAmbient;
++
++      scene.add(object);
++
++      // Center the asset over the origin and rest it on the ground grid.
++      const initialBox = new THREE.Box3().setFromObject(object);
++      const center = initialBox.getCenter(new THREE.Vector3());
++      object.position.x -= center.x;
++      object.position.z -= center.z;
++      object.position.y -= initialBox.min.y;
++
++      if (update) update(t);
++      if (updateAmbient) updateAmbient(t);
++
++      const framedBox = new THREE.Box3().setFromObject(object);
++      const sphere = framedBox.getBoundingSphere(new THREE.Sphere());
++      const radius = Math.max(sphere.radius, 0.5);
++      const fovRad = THREE.MathUtils.degToRad(camera.fov);
++      const distance = (radius / Math.sin(fovRad / 2)) * 1.6;
++
++      const azimuth = THREE.MathUtils.degToRad(angleIndex * 45);
++      const elevation = THREE.MathUtils.degToRad(20);
++      const focus = sphere.center;
++      camera.position.set(
++        focus.x + distance * Math.cos(elevation) * Math.sin(azimuth),
++        focus.y + distance * Math.sin(elevation),
++        focus.z + distance * Math.cos(elevation) * Math.cos(azimuth)
++      );
++      camera.lookAt(focus);
++    }
++  }
++
++  function onResize(): void {
++    camera.aspect = window.innerWidth / window.innerHeight;
++    camera.updateProjectionMatrix();
++    renderer.setSize(window.innerWidth, window.innerHeight);
++  }
++  window.addEventListener('resize', onResize);
++
++  renderer.render(scene, camera);
++  window.__READY = true;
++}
+diff --git a/tools/shoot.mjs b/tools/shoot.mjs
+new file mode 100644
+index 0000000..e2f0cda
+--- /dev/null
++++ b/tools/shoot.mjs
+@@ -0,0 +1,18 @@
++import { chromium } from 'playwright';
++import { mkdirSync } from 'node:fs';
++const args = Object.fromEntries(process.argv.slice(2).map((a,i,arr)=>a.startsWith('--')?[a.slice(2),arr[i+1]??'1']:[]).filter(Boolean));
++const base = args.url ?? 'http://localhost:5173';
++mkdirSync(args.out ?? 'shots', { recursive: true });
++const browser = await chromium.launch();
++const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
++async function snap(url, file) {
++  await page.goto(url); await page.waitForFunction('window.__READY === true', { timeout: 30000 });
++  await page.screenshot({ path: `${args.out ?? 'shots'}/${file}` }); console.log('saved', file);
++}
++if (args.viewer) {
++  const n = Number(args.angles ?? 4);
++  for (let a = 0; a < n; a++) await snap(`${base}/?viewer=${args.viewer}&angle=${a}&t=${args.t ?? 0.5}`, `${args.viewer}-a${a}.png`);
++} else {
++  for (const s of String(args.scroll ?? '0').split(',')) await snap(`${base}/?shot=${s}`, `scroll-${s}.png`);
++}
++await browser.close();

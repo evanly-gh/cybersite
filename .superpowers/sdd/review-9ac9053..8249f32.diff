@@ -1,0 +1,1174 @@
+# Review package: 9ac9053..HEAD
+
+## Commits
+8249f32 fix(farfield): night-mood calibration — dark bodies, sparse lit windows, dark ocean
+a77148c feat: far-field skyline, sky, rising moon, ocean with moon glitter
+
+## Files changed
+ src/main.ts            |   6 +
+ src/viewer/viewer.ts   | 100 +++++--
+ src/world/farField.ts  | 702 +++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/farField.test.ts | 199 ++++++++++++++
+ tools/shoot.mjs        |  15 +-
+ 5 files changed, 994 insertions(+), 28 deletions(-)
+
+## Diff
+diff --git a/src/main.ts b/src/main.ts
+index 587cc65..4aded91 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -6,20 +6,21 @@ import * as THREE from 'three';
+ import { COLORS } from './theme';
+ import { registerAsset } from './viewer/registry';
+ import { runViewer } from './viewer/viewer';
+ import { initCore } from './core/core';
+ import { RESUME, type ImageSlot } from './content/resume';
+ import { makePlaceholder } from './content/placeholders';
+ import { AD_SIZES, makeAd, type AdFormat } from './content/adGenerator';
+ import { ROUTE, WAYPOINTS } from './world/route';
+ import { makeCanvasTexture } from './utils/canvasText';
+ import { buildStreets, buildStreetsShibuya, buildStreetsRamp, buildStreetsBridge } from './world/streets';
++import { buildFarField } from './world/farField';
+ 
+ /**
+  * TEMP sanity scene for Task 4 verification: a grid of emissive-magenta boxes with a
+  * slow orbiting camera. Exercised by `npm run shoot -- --scroll 0`. Superseded once
+  * Task 25 wires the real scroll-driven scene graph.
+  */
+ function buildSanityScene(canvas: HTMLCanvasElement): void {
+   const core = initCore(canvas);
+ 
+   const geo = new THREE.BoxGeometry(1, 1, 1);
+@@ -219,20 +220,25 @@ function boot(): void {
+     registerAsset('routeDebug', () => buildRouteDebug());
+ 
+     // Task 7 verification: the full street network, plus zoomed-in sub-assets for the
+     // Shibuya crossing and a ramp jump (the whole network is ~1800m long, too big to
+     // judge fine detail in one auto-framed shot).
+     registerAsset('streets', (rng) => buildStreets(rng));
+     registerAsset('streetsShibuya', (rng) => buildStreetsShibuya(rng));
+     registerAsset('streetsRamp', (rng) => buildStreetsRamp(rng));
+     registerAsset('streetsBridge', (rng) => buildStreetsBridge(rng));
+ 
++    // Task 8 verification: Ring 2 skyline + sky/moon/ocean backdrop. World-scale (sky
++    // dome r=3200m) — always view this one via `?cam=` (see viewer.ts), not the default
++    // auto-framed turntable.
++    registerAsset('farField', (rng) => buildFarField(rng));
++
+     runViewer();
+     return;
+   }
+ 
+   const canvas = document.getElementById('stage') as HTMLCanvasElement;
+   if (canvas) {
+     buildSanityScene(canvas);
+   }
+ 
+   console.log('boot ok');
+diff --git a/src/viewer/viewer.ts b/src/viewer/viewer.ts
+index f37ddcc..09737d6 100644
+--- a/src/viewer/viewer.ts
++++ b/src/viewer/viewer.ts
+@@ -10,35 +10,61 @@ function hexColor(n: number): string {
+ 
+ function showMessage(text: string): void {
+   const msg = document.createElement('div');
+   msg.style.cssText =
+     'position:fixed;top:0;left:0;padding:8px 12px;color:#fff;font-family:monospace;font-size:14px;' +
+     `background:${hexColor(COLORS.void)};z-index:10`;
+   msg.textContent = text;
+   document.body.appendChild(msg);
+ }
+ 
++/** Parsed `?cam=x,y,z,tx,ty,tz` override: absolute camera position + lookAt target. */
++interface CamOverride {
++  pos: THREE.Vector3;
++  target: THREE.Vector3;
++}
++
++function parseCamOverride(raw: string | null): CamOverride | null {
++  if (!raw) return null;
++  const nums = raw.split(',').map(Number);
++  if (nums.length !== 6 || nums.some((n) => !Number.isFinite(n))) {
++    showMessage(`viewer: invalid ?cam="${raw}", expected 6 comma-separated numbers (x,y,z,tx,ty,tz)`);
++    return null;
++  }
++  return {
++    pos: new THREE.Vector3(nums[0], nums[1], nums[2]),
++    target: new THREE.Vector3(nums[3], nums[4], nums[5])
++  };
++}
++
+ /**
+  * Reads `?viewer=<name>&angle=<0-3>&t=<0..1>` from location.search, builds a minimal
+  * preview scene for the requested registered asset, frames the camera at one of four
+  * orbit angles (45° azimuth steps, 20° elevation), and exposes `window.__READY = true`
+  * once the first frame has been rendered. Uses core/core.ts for a consistent
+  * bloom/tonemap/vignette look; the viewer renders a single static frame via
+  * `core.render()` rather than starting core's animation loop.
++ *
++ * `?cam=x,y,z,tx,ty,tz` overrides the auto-framing entirely with an absolute camera
++ * position + lookAt target (world-space, no origin-centering). This exists for assets
++ * authored at true world scale (e.g. farField's ~3000m sky dome) where the default
++ * "center the bounding box over the origin, auto-distance the camera" logic produces a
++ * useless frame — there is no single small bounding box to frame a turntable shot of.
+  */
+ export function runViewer(): void {
+   const params = new URLSearchParams(location.search);
+   const name = params.get('viewer');
+   const angleIndex = Number(params.get('angle') ?? '0');
+   const t = Number(params.get('t') ?? '0.5');
+   // Fixed ambient time (seconds) so screenshots stay deterministic — not wall-clock.
+   const sec = Number(params.get('sec') ?? '2');
++  const camOverride = parseCamOverride(params.get('cam'));
+ 
+   document.body.innerHTML = '';
+   document.body.style.margin = '0';
+   document.body.style.overflow = 'hidden';
+ 
+   const canvas = document.createElement('canvas');
+   document.body.appendChild(canvas);
+ 
+   const core = initCore(canvas);
+   const { scene, camera } = core;
+@@ -67,45 +93,67 @@ export function runViewer(): void {
+       // harness screenshots the error instead of hanging 30s per angle.
+       try {
+         const rng = makeRng(1);
+         const entry: AssetEntry = make(rng);
+         const object = entry instanceof THREE.Object3D ? entry : entry.group;
+         const update = entry instanceof THREE.Object3D ? undefined : entry.update;
+         const updateAmbient = entry instanceof THREE.Object3D ? undefined : entry.updateAmbient;
+ 
+         scene.add(object);
+ 
+-        // Center the asset over the origin and rest it on the ground grid.
+-        const initialBox = new THREE.Box3().setFromObject(object);
+-        const center = initialBox.getCenter(new THREE.Vector3());
+-        object.position.x -= center.x;
+-        object.position.z -= center.z;
+-        object.position.y -= initialBox.min.y;
+-
+-        if (update) update(t);
+-        if (updateAmbient) updateAmbient(sec);
+-
+-        const framedBox = new THREE.Box3().setFromObject(object);
+-        const sphere = framedBox.getBoundingSphere(new THREE.Sphere());
+-        const radius = Math.max(sphere.radius, 0.5);
+-        const fovRad = THREE.MathUtils.degToRad(camera.fov);
+-        const distance = (radius / Math.sin(fovRad / 2)) * 1.6;
+-
+-        const azimuth = THREE.MathUtils.degToRad(angleIndex * 45);
+-        const elevation = THREE.MathUtils.degToRad(20);
+-        const focus = sphere.center;
+-        camera.position.set(
+-          focus.x + distance * Math.cos(elevation) * Math.sin(azimuth),
+-          focus.y + distance * Math.sin(elevation),
+-          focus.z + distance * Math.cos(elevation) * Math.cos(azimuth)
+-        );
+-        camera.lookAt(focus);
++        if (camOverride) {
++          // World-scale asset: keep its authored absolute coordinates untouched and
++          // point the camera exactly where the caller asked, skipping the
++          // center-on-origin + auto-distance framing below entirely.
++          if (update) update(t);
++          if (updateAmbient) updateAmbient(sec);
++          camera.position.copy(camOverride.pos);
++          camera.lookAt(camOverride.target);
++        } else {
++          // Center the asset over the origin and rest it on the ground grid.
++          const initialBox = new THREE.Box3().setFromObject(object);
++          const center = initialBox.getCenter(new THREE.Vector3());
++          object.position.x -= center.x;
++          object.position.z -= center.z;
++          object.position.y -= initialBox.min.y;
++
++          if (update) update(t);
++          if (updateAmbient) updateAmbient(sec);
++
++          const framedBox = new THREE.Box3().setFromObject(object);
++          const sphere = framedBox.getBoundingSphere(new THREE.Sphere());
++          const radius = Math.max(sphere.radius, 0.5);
++          const fovRad = THREE.MathUtils.degToRad(camera.fov);
++          const distance = (radius / Math.sin(fovRad / 2)) * 1.6;
++
++          const azimuth = THREE.MathUtils.degToRad(angleIndex * 45);
++          const elevation = THREE.MathUtils.degToRad(20);
++          const focus = sphere.center;
++          camera.position.set(
++            focus.x + distance * Math.cos(elevation) * Math.sin(azimuth),
++            focus.y + distance * Math.sin(elevation),
++            focus.z + distance * Math.cos(elevation) * Math.cos(azimuth)
++          );
++          camera.lookAt(focus);
++        }
+       } catch (err) {
+         console.error(`viewer: asset "${name}" threw`, err);
+         showMessage(`viewer: asset "${name}" threw: ${err instanceof Error ? err.message : String(err)}`);
+       }
+     }
+   }
+ 
+   core.render();
+-  window.__READY = true;
++  // WebGL canvases (no `preserveDrawingBuffer`) only guarantee their drawing buffer is
++  // visible to the compositor for the paint that immediately follows the draw call --
++  // flipping `__READY` synchronously right after `core.render()` races that paint, and
++  // Playwright's screenshot can land on a still-blank canvas (composited to plain white)
++  // often enough to matter on heavier scenes (e.g. farField's ~1100-instance skyline)
++  // even though it "usually" works for tiny sanity-scene props. Two nested rAFs push
++  // `__READY` past at least one full paint cycle so the harness always screenshots the
++  // frame that was actually drawn.
++  requestAnimationFrame(() => {
++    requestAnimationFrame(() => {
++      window.__READY = true;
++    });
++  });
+ }
+diff --git a/src/world/farField.ts b/src/world/farField.ts
+new file mode 100644
+index 0000000..b429e6e
+--- /dev/null
++++ b/src/world/farField.ts
+@@ -0,0 +1,702 @@
++import * as THREE from 'three';
++import { COLORS } from '../theme';
++import type { Rng } from '../utils/rng';
++import { makeCanvasTexture } from '../utils/canvasText';
++import { MOON_POS, MOON_RADIUS } from './route';
++
++/**
++ * Task 8: the far-field backdrop — Ring 2 skyline, sky dome, rising moon, and ocean.
++ * This is what makes the city read as endless beyond the streets Task 7 built, and it's
++ * the layer the finale's bridge run rides straight into (the moon sits dead ahead down
++ * the ocean-sector wedge). Everything here is authored in absolute world coordinates
++ * (matching route.ts / WAYPOINTS) rather than relative to a local origin — there is no
++ * "small prop" to center a turntable camera on.
++ */
++
++// ---------------------------------------------------------------------------------
++// Tunables (verbatim from the task brief)
++// ---------------------------------------------------------------------------------
++
++export const CITY_CENTER = new THREE.Vector3(0, 0, -200);
++export const SKYLINE_INNER_R = 250;
++export const SKYLINE_OUTER_R = 1600;
++export const SKYLINE_COUNT = 1100;
++export const BEACON_COUNT = 20;
++export const STAR_COUNT = 400;
++export const SKY_RADIUS = 3200;
++export const OCEAN_Z = -830; // ocean sector starts here (world z), matches the wedge exclusion
++export const WEDGE_HALF_DEG = 35; // 70 deg wedge, centered on -Z from CITY_CENTER
++
++// Round-2 iteration: a second, sparser, dimmer skyline ring further out (~1800m) so the
++// city doesn't have a hard, visibly-circular edge at 1600m — it just keeps fading into
++// the fog like a real endless skyline would.
++export const FAR_SKYLINE_INNER_R = 1650;
++export const FAR_SKYLINE_OUTER_R = 2000;
++export const FAR_SKYLINE_COUNT = 450;
++const FAR_SKYLINE_DIM = 0.45;
++
++const WINDOW_PITCH = 3.4; // meters per window cell, both axes
++const FOG_DENSITY = 0.0016; // must match core.ts scene.fog (FogExp2) — see uFogDensity note below
++
++// ---------------------------------------------------------------------------------
++// Skyline instance data
++// ---------------------------------------------------------------------------------
++
++interface BuildingData {
++  x: number;
++  z: number;
++  width: number;
++  depth: number;
++  height: number;
++  rotY: number;
++  seed: number;
++}
++
++/** True if (x,z) falls in the 70deg -Z wedge AND is beyond the ocean's start line — the
++ * region reserved for open water / sightline to the moon. Land nearer than OCEAN_Z in
++ * that same compass direction (waterfront blocks) is still buildable. */
++function inOceanWedge(x: number, z: number): boolean {
++  if (z >= OCEAN_Z) return false;
++  const dx = x - CITY_CENTER.x;
++  const dz = z - CITY_CENTER.z;
++  const angle = Math.atan2(dx, -dz); // 0 == due -Z from city center
++  return Math.abs(angle) < THREE.MathUtils.degToRad(WEDGE_HALF_DEG);
++}
++
++/** Area-uniform point in the [innerR, outerR] annulus around CITY_CENTER. */
++function sampleAnnulusPoint(rng: Rng, innerR: number, outerR: number): { x: number; z: number } {
++  const rMin2 = innerR * innerR;
++  const rMax2 = outerR * outerR;
++  const r = Math.sqrt(rng.range(rMin2, rMax2));
++  const theta = rng.range(0, Math.PI * 2);
++  return {
++    x: CITY_CENTER.x + r * Math.sin(theta),
++    z: CITY_CENTER.z - r * Math.cos(theta)
++  };
++}
++
++/**
++ * Generates `count` building placements via rejection sampling (redraw whenever a
++ * candidate lands in the ocean wedge — that's ~19% of the annulus's area, so this
++ * converges in a small multiple of `count` draws). Heights are lognormal-ish
++ * (12 + rng()^2 * 170), footprints 14-60m with 30% elongated up to 1:3, and a
++ * 90-degree-snapped yaw with +/-6deg jitter so the skyline reads as gridded blocks,
++ * not scattered debris. `innerR`/`outerR` let a second, farther/dimmer ring (Round-2
++ * iteration: depth cue beyond the primary 250-1600m skyline) reuse the same generator.
++ */
++function generateBuildings(rng: Rng, count: number, innerR = SKYLINE_INNER_R, outerR = SKYLINE_OUTER_R): BuildingData[] {
++  const buildings: BuildingData[] = [];
++  let guard = 0;
++  const guardLimit = count * 20;
++
++  while (buildings.length < count && guard < guardLimit) {
++    guard++;
++    const { x, z } = sampleAnnulusPoint(rng, innerR, outerR);
++    if (inOceanWedge(x, z)) continue;
++
++    const height = 12 + rng() * rng() * 170;
++
++    let width: number;
++    let depth: number;
++    if (rng.chance(0.3)) {
++      const short = rng.range(14, 30);
++      const aspect = rng.range(1.5, 3);
++      const long = Math.min(60, short * aspect);
++      if (rng.chance(0.5)) {
++        width = long;
++        depth = short;
++      } else {
++        width = short;
++        depth = long;
++      }
++    } else {
++      width = rng.range(14, 60);
++      depth = THREE.MathUtils.clamp(width * rng.range(0.85, 1.15), 14, 60);
++    }
++
++    const snap = rng.int(0, 3) * (Math.PI / 2);
++    const jitter = THREE.MathUtils.degToRad(rng.range(-6, 6));
++
++    buildings.push({ x, z, width, depth, height, rotY: snap + jitter, seed: rng() });
++  }
++
++  return buildings;
++}
++
++// ---------------------------------------------------------------------------------
++// Skyline shader material
++// ---------------------------------------------------------------------------------
++
++const SKYLINE_VERTEX = /* glsl */ `
++  attribute vec3 aSize;
++  attribute float aSeed;
++
++  varying vec3 vLocalNormal;
++  varying vec2 vUvW;
++  varying vec3 vSize;
++  varying float vSeed;
++  varying float vFogDepth;
++
++  void main() {
++    vLocalNormal = normal;
++    vUvW = uv;
++    vSize = aSize;
++    vSeed = aSeed;
++
++    vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
++    vFogDepth = -mvPosition.z;
++    gl_Position = projectionMatrix * mvPosition;
++  }
++`;
++
++const SKYLINE_FRAGMENT = /* glsl */ `
++  uniform float uTime;
++  uniform vec3 uFogColor;
++  uniform float uFogDensity;
++  uniform vec3 uAmber;
++  uniform vec3 uTeal;
++  uniform vec3 uMagenta;
++  uniform vec3 uBody;
++  uniform float uDim;
++
++  varying vec3 vLocalNormal;
++  varying vec2 vUvW;
++  varying vec3 vSize;
++  varying float vSeed;
++  varying float vFogDepth;
++
++  // Deterministic hash: cell coords + per-instance seed (drawn from the app's seeded
++  // Rng in JS) -> pseudo-random float. No extra entropy source, so identical Rng seeds
++  // always produce identical window patterns.
++  float hash(vec2 p, float seed) {
++    vec3 p3 = fract(vec3(p.xyx) * 0.1031 + seed * 7.13);
++    p3 += dot(p3, p3.yzx + 33.33);
++    return fract((p3.x + p3.y) * p3.z);
++  }
++
++  void main() {
++    vec3 n = abs(vLocalNormal);
++    float isSide = step(n.y, 0.5);
++
++    // Box faces facing +-X span (depth, height); faces facing +-Z span (width, height).
++    float useX = step(n.z, n.x);
++    float faceWidth = mix(vSize.x, vSize.z, useX);
++    float faceHeight = vSize.y;
++
++    float cols = max(1.0, floor(faceWidth / ${WINDOW_PITCH.toFixed(1)}));
++    float rows = max(1.0, floor(faceHeight / ${WINDOW_PITCH.toFixed(1)}));
++
++    vec2 grid = vUvW * vec2(cols, rows);
++    vec2 cell = floor(grid);
++    vec2 cellUv = fract(grid);
++
++    float hLit = hash(cell, vSeed);
++    float hColor = hash(cell + vec2(17.0, 5.0), vSeed);
++    float hFlicker = hash(cell + vec2(91.0, 41.0), vSeed);
++    float hPeak = hash(cell + vec2(53.0, 29.0), vSeed);
++
++    float lit = step(hLit, 0.55);
++
++    vec3 winColor = mix(uAmber, uTeal, step(0.4, hColor));
++    winColor = mix(winColor, uMagenta, step(0.75, hColor));
++
++    // Calibration: night-mood windows are punctuation, not wallpaper. Most lit windows
++    // sit at a low, clearly-colored glow (won't cross the bloom threshold); only ~5%
++    // of windows pop to a bloom-eligible peak — that's what should read as bright dots
++    // scattered across an otherwise dark facade.
++    float peak = step(0.95, hPeak);
++    float level = mix(0.32, 1.6, peak);
++
++    float flickerMask = step(0.98, hFlicker);
++    float flickerWave = sin(uTime * (2.5 + hFlicker * 7.0) + hFlicker * 41.0) * 0.5 + 0.5;
++    float brightness = lit * level * mix(1.0, mix(0.1, 1.0, flickerWave), flickerMask);
++
++    float margin = 0.16;
++    float windowMask = step(margin, cellUv.x) * step(margin, cellUv.y) *
++                        step(cellUv.x, 1.0 - margin) * step(cellUv.y, 1.0 - margin);
++
++    float winVisible = lit * windowMask * isSide;
++    vec3 winEmissive = winColor * brightness * uDim;
++
++    vec3 body = uBody * (0.65 + 0.35 * cellUv.y);
++    vec3 result = mix(body, winEmissive, winVisible);
++
++    // Manual FogExp2 replica (core.ts owns scene.fog; a from-scratch ShaderMaterial can't
++    // pull in the fog_fragment chunk, so match its math here) with lit windows punching
++    // through more than the dark body — real-world night skylines read as scattered
++    // glints against haze, not silhouettes. uDim (< 1 for the Round-2 far/dim second
++    // layer at ~1800m) also weakens the punch-through so that layer reads as a fainter,
++    // more fog-buried silhouette behind the primary skyline.
++    float fogFactor = 1.0 - exp(-uFogDensity * uFogDensity * vFogDepth * vFogDepth);
++    float effectiveFog = fogFactor * (1.0 - winVisible * 0.85 * uDim);
++    result = mix(result, uFogColor, clamp(effectiveFog, 0.0, 1.0));
++
++    gl_FragColor = vec4(result, 1.0);
++  }
++`;
++
++function buildSkylineMaterial(dim: number): THREE.ShaderMaterial {
++  return new THREE.ShaderMaterial({
++    uniforms: {
++      uTime: { value: 0 },
++      uFogColor: { value: new THREE.Color(COLORS.void) },
++      uFogDensity: { value: FOG_DENSITY },
++      uAmber: { value: new THREE.Color(COLORS.sodiumAmber) },
++      uTeal: { value: new THREE.Color(COLORS.holoTeal) },
++      uMagenta: { value: new THREE.Color(COLORS.signalMagenta) },
++      uBody: { value: new THREE.Color(0x0a0c16) },
++      uDim: { value: dim }
++    },
++    vertexShader: SKYLINE_VERTEX,
++    fragmentShader: SKYLINE_FRAGMENT,
++    fog: false
++  });
++}
++
++function buildSkylineMesh(
++  buildings: BuildingData[],
++  dim = 1
++): { mesh: THREE.InstancedMesh; tallestIdx: number[] } {
++  const geometry = new THREE.BoxGeometry(1, 1, 1);
++  const material = buildSkylineMaterial(dim);
++
++  const mesh = new THREE.InstancedMesh(geometry, material, buildings.length);
++  mesh.name = dim >= 1 ? 'skyline' : 'skylineFar';
++  // Instance placements span the full annulus while the underlying geometry is a unit
++  // box at the origin — the mesh's own (tiny) bounding sphere would get every instance
++  // frustum-culled at once. Disable culling for this mesh entirely.
++  mesh.frustumCulled = false;
++
++  const aSize = new Float32Array(buildings.length * 3);
++  const aSeed = new Float32Array(buildings.length);
++
++  const m = new THREE.Matrix4();
++  const q = new THREE.Quaternion();
++  const scale = new THREE.Vector3();
++  const euler = new THREE.Euler();
++  const pos = new THREE.Vector3();
++
++  buildings.forEach((b, i) => {
++    scale.set(b.width, b.height, b.depth);
++    euler.set(0, b.rotY, 0);
++    q.setFromEuler(euler);
++    pos.set(b.x, b.height / 2, b.z);
++    m.compose(pos, q, scale);
++    mesh.setMatrixAt(i, m);
++
++    aSize[i * 3 + 0] = b.width;
++    aSize[i * 3 + 1] = b.height;
++    aSize[i * 3 + 2] = b.depth;
++    aSeed[i] = b.seed;
++  });
++
++  mesh.instanceMatrix.needsUpdate = true;
++  geometry.setAttribute('aSize', new THREE.InstancedBufferAttribute(aSize, 3));
++  geometry.setAttribute('aSeed', new THREE.InstancedBufferAttribute(aSeed, 1));
++
++  const tallestIdx = buildings
++    .map((b, i) => ({ i, h: b.height }))
++    .sort((a, b) => b.h - a.h)
++    .slice(0, BEACON_COUNT)
++    .map((e) => e.i);
++
++  return { mesh, tallestIdx };
++}
++
++// ---------------------------------------------------------------------------------
++// Rooftop beacons (aircraft warning lights) on the 20 tallest towers
++// ---------------------------------------------------------------------------------
++
++interface Beacon {
++  sprite: THREE.Sprite;
++  phase: number;
++}
++
++function makeRadialGlowTexture(): THREE.CanvasTexture {
++  return makeCanvasTexture(128, 128, (ctx) => {
++    // Calibration fix: steeper falloff than the original (0.35 stop at 0.18 opacity)
++    // so glow sources (moon halo, rooftop beacons) read as a tight bright core with a
++    // quick taper instead of a broad soft wash that bloom then smears even further.
++    const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
++    g.addColorStop(0, 'rgba(255,255,255,1)');
++    g.addColorStop(0.1, 'rgba(255,255,255,0.55)');
++    g.addColorStop(0.22, 'rgba(255,255,255,0.1)');
++    g.addColorStop(1, 'rgba(255,255,255,0)');
++    ctx.fillStyle = g;
++    ctx.fillRect(0, 0, 128, 128);
++  });
++}
++
++function buildBeacons(
++  buildings: BuildingData[],
++  tallestIdx: number[],
++  rng: Rng,
++  glowTex: THREE.Texture
++): { group: THREE.Group; beacons: Beacon[] } {
++  const group = new THREE.Group();
++  group.name = 'beacons';
++  const beacons: Beacon[] = [];
++
++  for (const i of tallestIdx) {
++    const b = buildings[i];
++    const mat = new THREE.SpriteMaterial({
++      map: glowTex,
++      color: COLORS.sodiumAmber,
++      transparent: true,
++      opacity: 1,
++      depthWrite: false,
++      blending: THREE.AdditiveBlending,
++      fog: false
++    });
++    const sprite = new THREE.Sprite(mat);
++    sprite.position.set(b.x, b.height + 3, b.z);
++    sprite.scale.set(11, 11, 1);
++    group.add(sprite);
++    beacons.push({ sprite, phase: rng.range(0, Math.PI * 2) });
++  }
++
++  return { group, beacons };
++}
++
++// ---------------------------------------------------------------------------------
++// Sky dome + stars
++// ---------------------------------------------------------------------------------
++
++function buildSky(): THREE.Mesh {
++  const geo = new THREE.SphereGeometry(SKY_RADIUS, 32, 16);
++  const mat = new THREE.ShaderMaterial({
++    uniforms: {
++      uVoid: { value: new THREE.Color(COLORS.void) },
++      uHorizon: { value: new THREE.Color(0x0b0e1e) },
++      // Calibration fix: an amber haze here read as warm daylight fog, violating the
++      // night-mood brief ("kill the amber horizon glow"). A real light-polluted night
++      // sky stains blue-violet, not amber, once you're this far from the source — swap
++      // hue and cut the amplitude so it's a subtle tint, not a wash.
++      uHaze: { value: new THREE.Color(0x2a1e55) }
++    },
++    vertexShader: /* glsl */ `
++      varying vec3 vDir;
++      void main() {
++        vDir = normalize(position);
++        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
++      }
++    `,
++    fragmentShader: /* glsl */ `
++      uniform vec3 uVoid;
++      uniform vec3 uHorizon;
++      uniform vec3 uHaze;
++      varying vec3 vDir;
++      void main() {
++        float t = clamp(abs(vDir.y) / 0.5, 0.0, 1.0);
++        vec3 color = mix(uHorizon, uVoid, t);
++
++        // Tight exponential band around the horizon (vDir.y == 0), biased to sit mostly
++        // at/above the skyline rather than washing the whole lower sky. Kept subtle —
++        // this is a faint light-pollution tint, not a glow.
++        float haze = exp(-abs(vDir.y) * 14.0) * 0.10;
++        color += uHaze * haze;
++
++        gl_FragColor = vec4(color, 1.0);
++      }
++    `,
++    side: THREE.BackSide,
++    depthWrite: false,
++    fog: false
++  });
++  const mesh = new THREE.Mesh(geo, mat);
++  mesh.name = 'sky';
++  mesh.frustumCulled = false;
++  return mesh;
++}
++
++function buildStars(rng: Rng, count: number): THREE.Points {
++  const positions = new Float32Array(count * 3);
++  const minY = Math.sin(THREE.MathUtils.degToRad(15));
++  const r = SKY_RADIUS * 0.98;
++
++  for (let i = 0; i < count; i++) {
++    let x = 0;
++    let y = 0;
++    let z = 0;
++    let tries = 0;
++    do {
++      const u = rng.range(-1, 1);
++      const theta = rng.range(0, Math.PI * 2);
++      const s = Math.sqrt(Math.max(0, 1 - u * u));
++      x = s * Math.cos(theta);
++      y = u;
++      z = s * Math.sin(theta);
++      tries++;
++    } while (y < minY && tries < 50);
++    y = Math.max(y, minY);
++
++    positions[i * 3 + 0] = x * r;
++    positions[i * 3 + 1] = y * r;
++    positions[i * 3 + 2] = z * r;
++  }
++
++  const geo = new THREE.BufferGeometry();
++  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
++  geo.computeBoundingSphere();
++
++  const mat = new THREE.PointsMaterial({
++    color: 0xffffff,
++    size: 3.2,
++    sizeAttenuation: true,
++    transparent: true,
++    opacity: 0.85,
++    depthWrite: false,
++    fog: false,
++    blending: THREE.AdditiveBlending
++  });
++
++  const points = new THREE.Points(geo, mat);
++  points.name = 'stars';
++  points.frustumCulled = false;
++  return points;
++}
++
++// ---------------------------------------------------------------------------------
++// Moon
++// ---------------------------------------------------------------------------------
++
++function buildMoon(rng: Rng): THREE.Group {
++  const group = new THREE.Group();
++  group.name = 'moon';
++
++  const moonHex = '#' + COLORS.moonlight.toString(16).padStart(6, '0');
++  const craterTex = makeCanvasTexture(256, 256, (ctx) => {
++    ctx.fillStyle = moonHex;
++    ctx.fillRect(0, 0, 256, 256);
++    for (let i = 0; i < 46; i++) {
++      const cr = rng.range(4, 20);
++      const cx = rng.range(0, 256);
++      const cy = rng.range(0, 256);
++      const shade = rng.range(0.06, 0.22);
++      ctx.fillStyle = `rgba(25,22,30,${shade})`;
++      ctx.beginPath();
++      ctx.arc(cx, cy, cr, 0, Math.PI * 2);
++      ctx.fill();
++    }
++  });
++
++  const sphere = new THREE.Mesh(
++    new THREE.SphereGeometry(MOON_RADIUS, 48, 32),
++    new THREE.MeshBasicMaterial({ map: craterTex, color: 0xffffff, fog: false })
++  );
++  sphere.position.copy(MOON_POS);
++  sphere.frustumCulled = false;
++  group.add(sphere);
++
++  // Calibration fix: the moon itself is allowed to stay a bright "money shot," but its
++  // additive glow sprite was wide/strong enough that UnrealBloomPass (screen-space,
++  // owned by core.ts — not tunable here) smeared it across the entire lower frame,
++  // washing the ocean into a grey sheet instead of leaving it dark around a narrow
++  // glitter streak. Shrinking + dimming the glow source starves that bloom bleed at
++  // the source without touching bloom itself or the moon's own core brightness.
++  const glowTex = makeRadialGlowTexture();
++  const glowMat = new THREE.SpriteMaterial({
++    map: glowTex,
++    color: COLORS.moonlight,
++    transparent: true,
++    opacity: 0.22,
++    depthWrite: false,
++    blending: THREE.AdditiveBlending,
++    fog: false
++  });
++  const glow = new THREE.Sprite(glowMat);
++  glow.position.copy(MOON_POS);
++  const glowDiameter = MOON_RADIUS * 1.35 * 2;
++  glow.scale.set(glowDiameter, glowDiameter, 1);
++  group.add(glow);
++
++  return group;
++}
++
++// ---------------------------------------------------------------------------------
++// Ocean + moon-glitter streak
++// ---------------------------------------------------------------------------------
++
++const OCEAN_WIDTH = 4000;
++const OCEAN_DEPTH = 2400;
++const OCEAN_Y = -0.5;
++
++function buildOcean(): THREE.Mesh {
++  const centerZ = OCEAN_Z - OCEAN_DEPTH / 2;
++  const geo = new THREE.PlaneGeometry(OCEAN_WIDTH, OCEAN_DEPTH, 1, 1);
++  geo.rotateX(-Math.PI / 2);
++
++  const oceanColor = new THREE.Color(COLORS.void).lerp(new THREE.Color(COLORS.shadowBlue), 0.1);
++  const mat = new THREE.MeshPhysicalMaterial({
++    color: oceanColor,
++    roughness: 0.08,
++    metalness: 0,
++    // Calibration fix: even at 0.2, specularIntensity let the viewer harness's bright
++    // directional key light turn this huge plane into a wide, blown-out mirror sheen —
++    // full-surface shine instead of a narrow moon-glitter streak. The night-mood brief
++    // wants the ocean itself near-black, with the *only* highlight being the dedicated
++    // glitter-streak mesh drawn on top. Killing specularIntensity removes the
++    // dielectric Fresnel highlight entirely (still leaves roughness at the brief's
++    // mandated 0.08, just with nothing to specularly reflect) while the ambient/hemi
++    // light still gives it a faint diffuse presence rather than pure flat black.
++    specularIntensity: 0,
++    specularColor: oceanColor
++  });
++
++  const mesh = new THREE.Mesh(geo, mat);
++  mesh.position.set(0, OCEAN_Y, centerZ);
++  mesh.name = 'ocean';
++  return mesh;
++}
++
++const GLITTER_VERTEX = /* glsl */ `
++  varying vec2 vUv;
++  void main() {
++    vUv = uv;
++    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
++  }
++`;
++
++const GLITTER_FRAGMENT = /* glsl */ `
++  uniform float uTime;
++  uniform vec3 uColor;
++  varying vec2 vUv;
++
++  float hash(vec2 p) {
++    return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453);
++  }
++
++  float noise(vec2 p) {
++    vec2 i = floor(p);
++    vec2 f = fract(p);
++    float a = hash(i);
++    float b = hash(i + vec2(1.0, 0.0));
++    float c = hash(i + vec2(0.0, 1.0));
++    float d = hash(i + vec2(1.0, 1.0));
++    vec2 u = f * f * (3.0 - 2.0 * f);
++    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
++  }
++
++  void main() {
++    vec2 p = vec2(vUv.x * 6.0, vUv.y * 44.0 - uTime * 1.6);
++    float streak = noise(p) * noise(p * 2.3 + 11.0);
++    // Calibration fix: steeper center-weighted falloff (was 1.6) so the streak reads as
++    // a narrow bright thread down its own centerline rather than a solid glowing band
++    // edge-to-edge across its already-generous near width.
++    float edge = pow(1.0 - abs(vUv.x * 2.0 - 1.0), 4.0);
++    float alpha = streak * edge;
++    gl_FragColor = vec4(uColor, alpha * 0.8);
++  }
++`;
++
++/** Triangular glitter strip: wide near the bridge, tapering toward the moon on the horizon. */
++function buildGlitter(): { mesh: THREE.Mesh; material: THREE.ShaderMaterial } {
++  const xCenter = MOON_POS.x;
++  const zNear = OCEAN_Z - 30;
++  const zFar = MOON_POS.z;
++  // Calibration fix: at the brief's bridge-eye cam (6m above the water, only ~40m from
++  // this mesh's near edge) the original 90m near-width was *wider than the camera's
++  // entire frustum* at that distance — it wasn't reading as a streak at all, it was
++  // filling the whole screen width and reading as a full-surface sheen. Narrowed so it
++  // stays a clearly-bounded bright thread even from a low, close-up vantage.
++  const widthNear = 22;
++  const widthFar = 6;
++  const y = OCEAN_Y + 0.02;
++
++  const positions = new Float32Array([
++    xCenter - widthNear / 2, y, zNear,
++    xCenter + widthNear / 2, y, zNear,
++    xCenter + widthFar / 2, y, zFar,
++    xCenter - widthFar / 2, y, zFar
++  ]);
++  const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
++  const indices = [0, 1, 2, 0, 2, 3];
++
++  const geo = new THREE.BufferGeometry();
++  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
++  geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
++  geo.setIndex(indices);
++  geo.computeVertexNormals();
++  geo.computeBoundingSphere();
++
++  const material = new THREE.ShaderMaterial({
++    uniforms: {
++      uTime: { value: 0 },
++      uColor: { value: new THREE.Color(COLORS.moonlight) }
++    },
++    vertexShader: GLITTER_VERTEX,
++    fragmentShader: GLITTER_FRAGMENT,
++    transparent: true,
++    blending: THREE.AdditiveBlending,
++    depthWrite: false,
++    fog: false
++  });
++
++  const mesh = new THREE.Mesh(geo, material);
++  mesh.name = 'moonGlitter';
++  return { mesh, material };
++}
++
++// ---------------------------------------------------------------------------------
++// Public entry point
++// ---------------------------------------------------------------------------------
++
++const BEACON_PERIOD_SEC = 2.4;
++const BEACON_DUTY = 0.18;
++
++export function buildFarField(rng: Rng): { group: THREE.Group; updateAmbient: (sec: number) => void } {
++  const group = new THREE.Group();
++  group.name = 'farField';
++
++  const sky = buildSky();
++  group.add(sky);
++
++  const stars = buildStars(rng, STAR_COUNT);
++  group.add(stars);
++
++  const buildings = generateBuildings(rng, SKYLINE_COUNT);
++  const { mesh: skylineMesh, tallestIdx } = buildSkylineMesh(buildings);
++  group.add(skylineMesh);
++
++  // Round-2 iteration: dimmer, sparser second ring at ~1650-2000m so the primary
++  // skyline's 1600m cutoff doesn't read as a hard, suspiciously circular city edge.
++  const farBuildings = generateBuildings(rng, FAR_SKYLINE_COUNT, FAR_SKYLINE_INNER_R, FAR_SKYLINE_OUTER_R);
++  const { mesh: farSkylineMesh } = buildSkylineMesh(farBuildings, FAR_SKYLINE_DIM);
++  group.add(farSkylineMesh);
++
++  const glowTex = makeRadialGlowTexture();
++  const { group: beaconGroup, beacons } = buildBeacons(buildings, tallestIdx, rng, glowTex);
++  group.add(beaconGroup);
++
++  const moon = buildMoon(rng);
++  group.add(moon);
++
++  const ocean = buildOcean();
++  group.add(ocean);
++
++  const { mesh: glitterMesh, material: glitterMat } = buildGlitter();
++  group.add(glitterMesh);
++
++  const skylineMat = skylineMesh.material as THREE.ShaderMaterial;
++  const farSkylineMat = farSkylineMesh.material as THREE.ShaderMaterial;
++
++  function updateAmbient(sec: number): void {
++    skylineMat.uniforms.uTime.value = sec;
++    farSkylineMat.uniforms.uTime.value = sec;
++    glitterMat.uniforms.uTime.value = sec;
++
++    for (const beacon of beacons) {
++      const cyclePos = ((sec + beacon.phase) % BEACON_PERIOD_SEC) / BEACON_PERIOD_SEC;
++      let pulse = 0;
++      if (cyclePos < BEACON_DUTY) {
++        const rise = THREE.MathUtils.smoothstep(cyclePos, 0, BEACON_DUTY * 0.35);
++        const fall = 1 - THREE.MathUtils.smoothstep(cyclePos, BEACON_DUTY * 0.65, BEACON_DUTY);
++        pulse = rise * fall;
++      }
++      (beacon.sprite.material as THREE.SpriteMaterial).opacity = 0.08 + 0.92 * pulse;
++    }
++  }
++  updateAmbient(0);
++
++  return { group, updateAmbient };
++}
+diff --git a/tests/farField.test.ts b/tests/farField.test.ts
+new file mode 100644
+index 0000000..3739bb7
+--- /dev/null
++++ b/tests/farField.test.ts
+@@ -0,0 +1,199 @@
++import { describe, it, expect } from 'vitest';
++import * as THREE from 'three';
++import { makeRng } from '../src/utils/rng';
++
++// farField.ts builds canvas textures (moon crater speckle, beacon/glow gradients) via
++// makeCanvasTexture, which needs a DOM canvas 2D context. Node has neither, so stub a
++// context whose every property access returns a function that (when called) returns the
++// same stub proxy again -- this makes chained calls like
++// `ctx.createRadialGradient(...).addColorStop(...)` safe, unlike a context stub whose
++// methods return plain `{}` (streets.test.ts's stub doesn't need gradients).
++function makeCtxStub(): CanvasRenderingContext2D {
++  const proxy: unknown = new Proxy(
++    {},
++    {
++      get: () => () => proxy,
++      set: () => true
++    }
++  );
++  return proxy as CanvasRenderingContext2D;
++}
++
++(globalThis as any).document = (globalThis as any).document ?? {
++  createElement: () => ({
++    width: 0,
++    height: 0,
++    getContext: () => makeCtxStub()
++  })
++};
++
++import {
++  buildFarField,
++  CITY_CENTER,
++  SKYLINE_INNER_R,
++  SKYLINE_OUTER_R,
++  SKYLINE_COUNT,
++  FAR_SKYLINE_INNER_R,
++  FAR_SKYLINE_OUTER_R,
++  FAR_SKYLINE_COUNT,
++  BEACON_COUNT,
++  STAR_COUNT,
++  OCEAN_Z,
++  WEDGE_HALF_DEG
++} from '../src/world/farField';
++
++function findMeshByName(group: THREE.Group, name: string): THREE.InstancedMesh {
++  let mesh: THREE.InstancedMesh | undefined;
++  group.traverse((o) => {
++    if (o.name === name && (o as THREE.InstancedMesh).isInstancedMesh) mesh = o as THREE.InstancedMesh;
++  });
++  if (!mesh) throw new Error(`no InstancedMesh named "${name}" found`);
++  return mesh;
++}
++
++function assertInAnnulus(
++  mesh: THREE.InstancedMesh,
++  innerR: number,
++  outerR: number,
++  wedgeHalfRad: number
++): void {
++  const m = new THREE.Matrix4();
++  const pos = new THREE.Vector3();
++  for (let i = 0; i < mesh.count; i++) {
++    mesh.getMatrixAt(i, m);
++    pos.setFromMatrixPosition(m);
++    const dx = pos.x - CITY_CENTER.x;
++    const dz = pos.z - CITY_CENTER.z;
++    const r = Math.hypot(dx, dz);
++    expect(r).toBeGreaterThanOrEqual(innerR - 1e-6);
++    expect(r).toBeLessThanOrEqual(outerR + 1e-6);
++
++    if (pos.z < OCEAN_Z) {
++      const angle = Math.atan2(dx, -dz);
++      expect(Math.abs(angle)).toBeGreaterThanOrEqual(wedgeHalfRad);
++    }
++  }
++}
++import { MOON_POS, MOON_RADIUS } from '../src/world/route';
++
++function findByName(group: THREE.Group, name: string): THREE.Object3D | undefined {
++  let found: THREE.Object3D | undefined;
++  group.traverse((o) => {
++    if (o.name === name) found = o;
++  });
++  return found;
++}
++
++describe('farField', () => {
++  it('builds an InstancedMesh skyline with SKYLINE_COUNT instances', () => {
++    const { group } = buildFarField(makeRng(1));
++    const mesh = findMeshByName(group, 'skyline');
++    expect(mesh.count).toBe(SKYLINE_COUNT);
++    // huge annulus vs. tiny unit-box geometry -- must not be frustum-culled as one blob.
++    expect(mesh.frustumCulled).toBe(false);
++  });
++
++  it('builds a second, dimmer far skyline ring (Round-2 depth iteration) with FAR_SKYLINE_COUNT instances', () => {
++    const { group } = buildFarField(makeRng(1));
++    const mesh = findMeshByName(group, 'skylineFar');
++    expect(mesh.count).toBe(FAR_SKYLINE_COUNT);
++    expect(mesh.frustumCulled).toBe(false);
++    const mat = mesh.material as THREE.ShaderMaterial;
++    expect(mat.uniforms.uDim.value).toBeLessThan(1);
++  });
++
++  it('places every skyline instance in the annulus and outside the ocean wedge', () => {
++    const { group } = buildFarField(makeRng(1));
++    const mesh = findMeshByName(group, 'skyline');
++    const wedgeHalfRad = THREE.MathUtils.degToRad(WEDGE_HALF_DEG);
++    assertInAnnulus(mesh, SKYLINE_INNER_R, SKYLINE_OUTER_R, wedgeHalfRad);
++  });
++
++  it('places every far-ring instance in its own (farther) annulus and outside the ocean wedge', () => {
++    const { group } = buildFarField(makeRng(1));
++    const mesh = findMeshByName(group, 'skylineFar');
++    const wedgeHalfRad = THREE.MathUtils.degToRad(WEDGE_HALF_DEG);
++    assertInAnnulus(mesh, FAR_SKYLINE_INNER_R, FAR_SKYLINE_OUTER_R, wedgeHalfRad);
++  });
++
++  it('is deterministic for a given seed (instance transforms + beacon count match)', () => {
++    const a = buildFarField(makeRng(7));
++    const b = buildFarField(makeRng(7));
++
++    for (const name of ['skyline', 'skylineFar']) {
++      const meshA = findMeshByName(a.group, name);
++      const meshB = findMeshByName(b.group, name);
++      expect(meshA.count).toBe(meshB.count);
++
++      const arrA = (meshA.instanceMatrix.array as Float32Array).slice();
++      const arrB = (meshB.instanceMatrix.array as Float32Array).slice();
++      expect(arrA).toEqual(arrB);
++    }
++
++    const beaconsA = findByName(a.group, 'beacons') as THREE.Group;
++    const beaconsB = findByName(b.group, 'beacons') as THREE.Group;
++    expect(beaconsA.children.length).toBe(BEACON_COUNT);
++    expect(beaconsA.children.length).toBe(beaconsB.children.length);
++  });
++
++  it('places the moon sphere at MOON_POS with radius MOON_RADIUS', () => {
++    const { group } = buildFarField(makeRng(1));
++    const moonGroup = findByName(group, 'moon') as THREE.Group;
++    expect(moonGroup).toBeDefined();
++    let sphere: THREE.Mesh | undefined;
++    moonGroup.traverse((o) => {
++      if ((o as THREE.Mesh).isMesh) sphere = o as THREE.Mesh;
++    });
++    expect(sphere).toBeDefined();
++    expect(sphere!.position.distanceTo(MOON_POS)).toBeLessThan(1e-6);
++    const geo = sphere!.geometry as THREE.SphereGeometry;
++    expect(geo.parameters.radius).toBe(MOON_RADIUS);
++  });
++
++  it('places the ocean plane at y=-0.5 covering z < -830', () => {
++    const { group } = buildFarField(makeRng(1));
++    const ocean = findByName(group, 'ocean') as THREE.Mesh;
++    expect(ocean).toBeDefined();
++    expect(ocean.position.y).toBeCloseTo(-0.5, 5);
++    ocean.updateMatrixWorld(true);
++    const box = new THREE.Box3().setFromObject(ocean);
++    expect(box.max.z).toBeLessThanOrEqual(OCEAN_Z + 1e-6);
++  });
++
++  it('builds STAR_COUNT star points above 15deg elevation', () => {
++    const { group } = buildFarField(makeRng(1));
++    const stars = findByName(group, 'stars') as THREE.Points;
++    expect(stars).toBeDefined();
++    const positions = stars.geometry.getAttribute('position');
++    expect(positions.count).toBe(STAR_COUNT);
++    const minSin = Math.sin(THREE.MathUtils.degToRad(15)) - 1e-4;
++    for (let i = 0; i < positions.count; i++) {
++      const x = positions.getX(i);
++      const y = positions.getY(i);
++      const z = positions.getZ(i);
++      const r = Math.hypot(x, y, z);
++      expect(y / r).toBeGreaterThanOrEqual(minSin);
++    }
++  });
++
++  it('updateAmbient drives skyline/glitter uTime and beacon opacity without throwing', () => {
++    const { group, updateAmbient } = buildFarField(makeRng(3));
++    const skylineMat = findMeshByName(group, 'skyline').material as THREE.ShaderMaterial;
++    const farSkylineMat = findMeshByName(group, 'skylineFar').material as THREE.ShaderMaterial;
++    let glitterMat: THREE.ShaderMaterial | undefined;
++    group.traverse((o) => {
++      if (o.name === 'moonGlitter') glitterMat = (o as THREE.Mesh).material as THREE.ShaderMaterial;
++    });
++    expect(() => updateAmbient(12.3)).not.toThrow();
++    expect(skylineMat.uniforms.uTime.value).toBeCloseTo(12.3, 5);
++    expect(farSkylineMat.uniforms.uTime.value).toBeCloseTo(12.3, 5);
++    expect(glitterMat!.uniforms.uTime.value).toBeCloseTo(12.3, 5);
++
++    const beacons = findByName(group, 'beacons') as THREE.Group;
++    for (const child of beacons.children) {
++      const mat = (child as THREE.Sprite).material as THREE.SpriteMaterial;
++      expect(mat.opacity).toBeGreaterThanOrEqual(0);
++      expect(mat.opacity).toBeLessThanOrEqual(1);
++    }
++  });
++});
+diff --git a/tools/shoot.mjs b/tools/shoot.mjs
+index e2f0cda..9775dac 100644
+--- a/tools/shoot.mjs
++++ b/tools/shoot.mjs
+@@ -3,16 +3,27 @@ import { mkdirSync } from 'node:fs';
+ const args = Object.fromEntries(process.argv.slice(2).map((a,i,arr)=>a.startsWith('--')?[a.slice(2),arr[i+1]??'1']:[]).filter(Boolean));
+ const base = args.url ?? 'http://localhost:5173';
+ mkdirSync(args.out ?? 'shots', { recursive: true });
+ const browser = await chromium.launch();
+ const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+ async function snap(url, file) {
+   await page.goto(url); await page.waitForFunction('window.__READY === true', { timeout: 30000 });
+   await page.screenshot({ path: `${args.out ?? 'shots'}/${file}` }); console.log('saved', file);
+ }
+ if (args.viewer) {
+-  const n = Number(args.angles ?? 4);
+-  for (let a = 0; a < n; a++) await snap(`${base}/?viewer=${args.viewer}&angle=${a}&t=${args.t ?? 0.5}`, `${args.viewer}-a${a}.png`);
++  if (args.cam) {
++    // Absolute camera override (world-scale assets like farField) — one shot, no angle
++    // sweep, since ?cam= fully determines the view. --tag distinguishes multiple shots
++    // of the same viewer (e.g. bridge-eye vs. street-level).
++    const suffix = args.tag ? `-${args.tag}` : '-cam';
++    await snap(
++      `${base}/?viewer=${args.viewer}&cam=${args.cam}&t=${args.t ?? 0.5}&sec=${args.sec ?? 2}`,
++      `${args.viewer}${suffix}.png`
++    );
++  } else {
++    const n = Number(args.angles ?? 4);
++    for (let a = 0; a < n; a++) await snap(`${base}/?viewer=${args.viewer}&angle=${a}&t=${args.t ?? 0.5}`, `${args.viewer}-a${a}.png`);
++  }
+ } else {
+   for (const s of String(args.scroll ?? '0').split(',')) await snap(`${base}/?shot=${s}`, `scroll-${s}.png`);
+ }
+ await browser.close();

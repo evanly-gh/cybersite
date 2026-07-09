@@ -1,0 +1,422 @@
+# Review package: d1c54f1..HEAD
+
+## Commits
+2d5584a feat: core renderer with bloom/CA/vignette + quality tiers
+
+## Files changed
+ src/core/core.ts     | 202 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ src/main.ts          |  60 +++++++++++++--
+ src/viewer/viewer.ts |  26 +++----
+ 3 files changed, 263 insertions(+), 25 deletions(-)
+
+## Diff
+diff --git a/src/core/core.ts b/src/core/core.ts
+new file mode 100644
+index 0000000..ef81e77
+--- /dev/null
++++ b/src/core/core.ts
+@@ -0,0 +1,202 @@
++import * as THREE from 'three';
++import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
++import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
++import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
++import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
++import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
++import { COLORS } from '../theme';
++
++export interface Core {
++  renderer: THREE.WebGLRenderer;
++  scene: THREE.Scene;
++  camera: THREE.PerspectiveCamera;
++  render(): void;
++  onFrame(cb: (sec: number) => void): void;
++  start(): void;
++  setQuality(tier: 0 | 1 | 2): void;
++  quality: 0 | 1 | 2;
++}
++
++const MAX_DPR_FULL = 1.75;
++const MAX_DPR_MED = 1.25;
++const MAX_DPR_LOW = 1;
++
++const AUTO_DROP_MS = 22;
++const AUTO_DROP_INTERVAL_SEC = 5;
++const ROLLING_FRAMES = 60;
++
++// Chromatic aberration (radial RGB offset) + vignette (smoothstep 0.55 -> 0.95, 35% strength).
++const CA_VIGNETTE_SHADER = {
++  uniforms: {
++    tDiffuse: { value: null as THREE.Texture | null }
++  },
++  vertexShader: /* glsl */ `
++    varying vec2 vUv;
++    void main() {
++      vUv = uv;
++      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
++    }
++  `,
++  fragmentShader: /* glsl */ `
++    uniform sampler2D tDiffuse;
++    varying vec2 vUv;
++
++    void main() {
++      vec2 center = vec2(0.5, 0.5);
++      vec2 toCenter = vUv - center;
++      float dist = length(toCenter);
++      vec2 dir = normalize(toCenter + 1e-6);
++      float offset = 0.0015;
++
++      float r = texture2D(tDiffuse, vUv - dir * offset * dist).r;
++      float g = texture2D(tDiffuse, vUv).g;
++      float b = texture2D(tDiffuse, vUv + dir * offset * dist).b;
++      float a = texture2D(tDiffuse, vUv).a;
++
++      vec3 color = vec3(r, g, b);
++
++      float vignette = smoothstep(0.95, 0.55, dist);
++      vignette = mix(1.0, vignette, 0.35);
++      color *= vignette;
++
++      gl_FragColor = vec4(color, a);
++    }
++  `
++};
++
++export function initCore(canvas: HTMLCanvasElement): Core {
++  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
++  renderer.toneMapping = THREE.ACESFilmicToneMapping;
++  renderer.toneMappingExposure = 1.1;
++  renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_DPR_FULL));
++  renderer.setSize(window.innerWidth, window.innerHeight);
++
++  const scene = new THREE.Scene();
++  scene.background = new THREE.Color(COLORS.void);
++  scene.fog = new THREE.FogExp2(COLORS.void, 0.0016);
++
++  const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 4000);
++  camera.position.set(0, 0, 10);
++
++  const composer = new EffectComposer(renderer);
++  const renderPass = new RenderPass(scene, camera);
++  composer.addPass(renderPass);
++
++  // UnrealBloomPass internally renders its brightness/blur targets at half of
++  // whatever width/height it is given via setSize(). EffectComposer drives that
++  // setSize() call directly with the full effective (DPR-scaled) resolution, which
++  // is exactly the "resolution 1/2" tier-2 spec. For tier 1 (bloom res 1/4) we
++  // re-invoke bloomPass.setSize() ourselves with half of the effective size so its
++  // internal halving lands on a quarter of the real resolution.
++  const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.9, 0.6, 0.75);
++  composer.addPass(bloomPass);
++
++  const caVignettePass = new ShaderPass(CA_VIGNETTE_SHADER);
++  composer.addPass(caVignettePass);
++
++  const outputPass = new OutputPass();
++  composer.addPass(outputPass);
++
++  let quality: 0 | 1 | 2 = 2;
++  const frameCallbacks: Array<(sec: number) => void> = [];
++
++  function applyQuality(tier: 0 | 1 | 2): void {
++    quality = tier;
++
++    if (tier === 2) {
++      bloomPass.enabled = true;
++      renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_DPR_FULL));
++    } else if (tier === 1) {
++      bloomPass.enabled = true;
++      renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_DPR_MED));
++    } else {
++      bloomPass.enabled = false;
++      renderer.setPixelRatio(MAX_DPR_LOW);
++    }
++
++    onResize();
++  }
++
++  function onResize(): void {
++    const w = window.innerWidth;
++    const h = window.innerHeight;
++    camera.aspect = w / h;
++    camera.updateProjectionMatrix();
++    renderer.setSize(w, h);
++    composer.setPixelRatio(renderer.getPixelRatio());
++    composer.setSize(w, h);
++
++    if (bloomPass.enabled) {
++      const effectiveW = w * renderer.getPixelRatio();
++      const effectiveH = h * renderer.getPixelRatio();
++      // Tier 2: leave composer's default setSize() call in place (bloom res = 1/2).
++      // Tier 1: re-halve it ourselves (bloom res = 1/4).
++      if (quality === 1) {
++        bloomPass.setSize(effectiveW / 2, effectiveH / 2);
++      }
++    }
++  }
++  window.addEventListener('resize', onResize);
++
++  // Rolling 60-frame average frame time, auto-dropping quality once per 5s if > 22ms.
++  const frameTimes: number[] = [];
++  let lastAutoDropSec = -Infinity;
++  let lastFrameStart = -1;
++
++  function render(): void {
++    composer.render();
++  }
++
++  let rafId = 0;
++  let startTimeSec = -1;
++
++  function tick(nowMs: number): void {
++    rafId = requestAnimationFrame(tick);
++    const nowSec = nowMs / 1000;
++    if (startTimeSec < 0) startTimeSec = nowSec;
++    const elapsed = nowSec - startTimeSec;
++
++    if (lastFrameStart >= 0) {
++      const dt = nowMs - lastFrameStart;
++      frameTimes.push(dt);
++      if (frameTimes.length > ROLLING_FRAMES) frameTimes.shift();
++
++      if (
++        frameTimes.length === ROLLING_FRAMES &&
++        elapsed - lastAutoDropSec >= AUTO_DROP_INTERVAL_SEC
++      ) {
++        const avg = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
++        if (avg > AUTO_DROP_MS && quality > 0) {
++          applyQuality((quality - 1) as 0 | 1 | 2);
++          lastAutoDropSec = elapsed;
++        }
++      }
++    }
++    lastFrameStart = nowMs;
++
++    for (const cb of frameCallbacks) cb(elapsed);
++    render();
++  }
++
++  const core: Core = {
++    renderer,
++    scene,
++    camera,
++    render,
++    onFrame(cb: (sec: number) => void): void {
++      frameCallbacks.push(cb);
++    },
++    start(): void {
++      if (rafId) return;
++      rafId = requestAnimationFrame(tick);
++    },
++    setQuality(tier: 0 | 1 | 2): void {
++      applyQuality(tier);
++    },
++    get quality(): 0 | 1 | 2 {
++      return quality;
++    }
++  };
++
++  return core;
++}
+diff --git a/src/main.ts b/src/main.ts
+index cdee899..8116641 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -1,44 +1,88 @@
+ import '@fontsource/unbounded';
+ import '@fontsource/rajdhani';
+ import '@fontsource/share-tech-mono';
+ import './styles.css';
+ import * as THREE from 'three';
+ import { COLORS } from './theme';
+ import { registerAsset } from './viewer/registry';
+ import { runViewer } from './viewer/viewer';
++import { initCore } from './core/core';
++
++/**
++ * TEMP sanity scene for Task 4 verification: a grid of emissive-magenta boxes with a
++ * slow orbiting camera. Exercised by `npm run shoot -- --scroll 0`. Superseded once
++ * Task 25 wires the real scroll-driven scene graph.
++ */
++function buildSanityScene(canvas: HTMLCanvasElement): void {
++  const core = initCore(canvas);
++
++  const geo = new THREE.BoxGeometry(1, 1, 1);
++  const mat = new THREE.MeshStandardMaterial({
++    color: COLORS.signalMagenta,
++    emissive: COLORS.signalMagenta,
++    emissiveIntensity: 3,
++    metalness: 0.2,
++    roughness: 0.4
++  });
++
++  const cols = 5;
++  const rows = 4;
++  const spacing = 2.2;
++  for (let i = 0; i < cols * rows; i++) {
++    const box = new THREE.Mesh(geo, mat);
++    const col = i % cols;
++    const row = Math.floor(i / cols);
++    box.position.set((col - (cols - 1) / 2) * spacing, (row - (rows - 1) / 2) * spacing, 0);
++    core.scene.add(box);
++  }
++
++  const hemi = new THREE.HemisphereLight(0xffffff, COLORS.shadowBlue, 1.0);
++  core.scene.add(hemi);
++  const key = new THREE.DirectionalLight(0xffffff, 1.2);
++  key.position.set(5, 8, 5);
++  core.scene.add(key);
++
++  core.camera.position.set(0, 0, 16);
++  core.camera.lookAt(0, 0, 0);
++
++  const orbitRadius = 16;
++  const orbitSpeed = 0.15; // rad/sec
++  core.onFrame((sec) => {
++    const angle = sec * orbitSpeed;
++    core.camera.position.set(Math.sin(angle) * orbitRadius, 0, Math.cos(angle) * orbitRadius);
++    core.camera.lookAt(0, 0, 0);
++  });
++
++  core.start();
++  core.render();
++  window.__READY = true;
++}
+ 
+ function boot(): void {
+   if (new URLSearchParams(location.search).has('viewer')) {
+     // TEMP: verification asset for Task 2 — delete this block when Phase 2 starts.
+     registerAsset('testCube', () => {
+       const geo = new THREE.BoxGeometry(2, 2, 2);
+       const mat = new THREE.MeshStandardMaterial({
+         color: COLORS.tronCyan,
+         emissive: COLORS.tronCyan,
+         emissiveIntensity: 1.2,
+         metalness: 0.2,
+         roughness: 0.3
+       });
+       return new THREE.Mesh(geo, mat);
+     });
+ 
+     runViewer();
+     return;
+   }
+ 
+-  // Temporary canvas setup
+   const canvas = document.getElementById('stage') as HTMLCanvasElement;
+   if (canvas) {
+-    const ctx = canvas.getContext('2d');
+-    if (ctx) {
+-      canvas.width = window.innerWidth;
+-      canvas.height = window.innerHeight;
+-      ctx.fillStyle = '#' + COLORS.void.toString(16).padStart(6, '0');
+-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+-    }
++    buildSanityScene(canvas);
+   }
+ 
+   console.log('boot ok');
+ }
+ 
+ boot();
+diff --git a/src/viewer/viewer.ts b/src/viewer/viewer.ts
+index 136279e..f37ddcc 100644
+--- a/src/viewer/viewer.ts
++++ b/src/viewer/viewer.ts
+@@ -1,66 +1,65 @@
+ import * as THREE from 'three';
+ import { COLORS } from '../theme';
+ import { getAsset, listAssets, type AssetEntry } from './registry';
+ import { makeRng } from '../utils/rng';
++import { initCore } from '../core/core';
+ 
+ function hexColor(n: number): string {
+   return '#' + n.toString(16).padStart(6, '0');
+ }
+ 
+ function showMessage(text: string): void {
+   const msg = document.createElement('div');
+   msg.style.cssText =
+     'position:fixed;top:0;left:0;padding:8px 12px;color:#fff;font-family:monospace;font-size:14px;' +
+     `background:${hexColor(COLORS.void)};z-index:10`;
+   msg.textContent = text;
+   document.body.appendChild(msg);
+ }
+ 
+ /**
+  * Reads `?viewer=<name>&angle=<0-3>&t=<0..1>` from location.search, builds a minimal
+  * preview scene for the requested registered asset, frames the camera at one of four
+  * orbit angles (45° azimuth steps, 20° elevation), and exposes `window.__READY = true`
+- * once the first frame has been rendered. Bloom composer arrives with core/core.ts in
+- * Task 4 — for now this uses a plain WebGLRenderer.
++ * once the first frame has been rendered. Uses core/core.ts for a consistent
++ * bloom/tonemap/vignette look; the viewer renders a single static frame via
++ * `core.render()` rather than starting core's animation loop.
+  */
+ export function runViewer(): void {
+   const params = new URLSearchParams(location.search);
+   const name = params.get('viewer');
+   const angleIndex = Number(params.get('angle') ?? '0');
+   const t = Number(params.get('t') ?? '0.5');
+   // Fixed ambient time (seconds) so screenshots stay deterministic — not wall-clock.
+   const sec = Number(params.get('sec') ?? '2');
+ 
+   document.body.innerHTML = '';
+   document.body.style.margin = '0';
+   document.body.style.overflow = 'hidden';
+ 
+-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+-  renderer.setPixelRatio(1);
+-  renderer.setSize(window.innerWidth, window.innerHeight);
+-  document.body.appendChild(renderer.domElement);
++  const canvas = document.createElement('canvas');
++  document.body.appendChild(canvas);
+ 
+-  const scene = new THREE.Scene();
+-  scene.background = new THREE.Color(COLORS.void);
++  const core = initCore(canvas);
++  const { scene, camera } = core;
+ 
+   const grid = new THREE.GridHelper(40, 40, COLORS.holoTeal, COLORS.shadowBlue);
+   scene.add(grid);
+ 
+   const hemi = new THREE.HemisphereLight(0xffffff, COLORS.shadowBlue, 1.0);
+   scene.add(hemi);
+ 
+   const key = new THREE.DirectionalLight(0xffffff, 1.5);
+   key.position.set(5, 8, 5);
+   scene.add(key);
+ 
+-  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 500);
+   camera.position.set(0, 3, 8);
+   camera.lookAt(0, 0, 0);
+ 
+   if (!name) {
+     showMessage('viewer: missing ?viewer=<name>');
+   } else {
+     const make = getAsset(name);
+     if (!make) {
+       showMessage(`viewer: unknown asset "${name}". registered: ${listAssets().join(', ') || '(none)'}`);
+     } else {
+@@ -100,20 +99,13 @@ export function runViewer(): void {
+           focus.z + distance * Math.cos(elevation) * Math.cos(azimuth)
+         );
+         camera.lookAt(focus);
+       } catch (err) {
+         console.error(`viewer: asset "${name}" threw`, err);
+         showMessage(`viewer: asset "${name}" threw: ${err instanceof Error ? err.message : String(err)}`);
+       }
+     }
+   }
+ 
+-  function onResize(): void {
+-    camera.aspect = window.innerWidth / window.innerHeight;
+-    camera.updateProjectionMatrix();
+-    renderer.setSize(window.innerWidth, window.innerHeight);
+-  }
+-  window.addEventListener('resize', onResize);
+-
+-  renderer.render(scene, camera);
++  core.render();
+   window.__READY = true;
+ }
