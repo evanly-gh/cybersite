@@ -7,6 +7,7 @@ import { COLORS } from './theme';
 import { runViewer } from './viewer/viewer';
 import { loadEntries } from './viewer/entries';
 import { initCore } from './core/core';
+import { initCursorTrail } from './fx/cursorTrail';
 
 /**
  * TEMP sanity scene for Task 4 verification: a grid of emissive-magenta boxes with a
@@ -71,6 +72,10 @@ function boot(): void {
   if (canvas) {
     buildSanityScene(canvas);
   }
+
+  // Task 23: site-wide cursor trail (sandevistan RGB-split). Self-disables on
+  // touch (pointer:coarse) and prefers-reduced-motion — no config needed here.
+  initCursorTrail();
 
   console.log('boot ok');
 }
