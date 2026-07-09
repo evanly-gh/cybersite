@@ -1,7 +1,8 @@
-
+.superpowers/
 node_modules/
 dist/
 shots/
 .env
 .env.local
 *.log
+.cline_storage/
