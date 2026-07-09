@@ -10,6 +10,7 @@
  * - `record(worldMatrix, t)` : call each frame/tick with the bike's world matrix and scroll t
  * - `setMode('ride'|'finale')` : ride = 12 ghosts, finale = all 24
  * - `update(t)` : call after record; selects visible ghost set
+ * - `reset()` : clears all accumulated state (call before a forced full rebuild)
  *
  * ## Material strategy
  * We use additive blending with `instanceColor` to encode both hue and brightness/opacity.
@@ -19,16 +20,14 @@
  * it integrates naturally with UnrealBloom (brighter = more bloom).
  *
  * ## Scrub-safety
- * `record()` accumulates the bike's 3D travel distance. Every SNAPSHOT_INTERVAL meters,
- * it stores a snapshot keyed by a quantized distance index (distIndex = floor(dist / 1.6)).
- * Because bikePath is a pure function of t, scrubbing backward then forward replays the
- * same (worldMatrix, t) pairs at each distance, so the distance-keyed store always holds
- * the same data for a given distance, making the ghost fan a pure function of current position.
+ * `record(worldMatrix, t)` is a pure function of the (worldMatrix, t) feed sequence.
+ * When t decreases (backward scrub), we clear all accumulated state so that a subsequent
+ * forward replay from the start produces identical distance-keyed snapshots. This makes
+ * the visible ghost set a pure function of the current position / t value.
  *
- * When t decreases (backward scrub), the position extracted from the matrix changes, and
- * old distance slots are simply overwritten by the new pass (which produces identical data
- * since the path is deterministic). `update(t)` selects the N snapshots with the largest
- * distIndex ≤ currentDistIndex, giving a consistent trailing fan.
+ * `update(t)` renders from the snapshot buffer built by record(). The snapshot buffer
+ * maintains an ordered array of active distance indices so the visible set is found in
+ * O(visibleCount) rather than O(currentDistIndex).
  */
 
 import * as THREE from 'three';
@@ -111,6 +110,8 @@ export interface SandevistanTrail {
   setMode(m: 'ride' | 'finale'): void;
   /** Refresh which ghosts are visible based on current t. Call after record(). */
   update(t: number): void;
+  /** Clear all accumulated state. Call when forcing a full rebuild (e.g. large scrub jump). */
+  reset(): void;
 }
 
 export function buildSandevistan(ghostGeom: THREE.BufferGeometry): SandevistanTrail {
@@ -136,10 +137,12 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): SandevistanTr
 
   // -------------------------------------------------------------------------
   // RGB-split echo meshes: 2 instanced copies of ECHO_GHOST_COUNT ghosts each
-  // Red echo (offset +lateral) and Blue echo (offset -lateral)
+  // Red echo (offset +lateral) and Blue echo (offset -lateral).
+  // color: 0xffffff so the per-instance color (set via setColorAt) carries
+  // the pure R / pure B tint without double-applying the material color.
   // -------------------------------------------------------------------------
   const echoMatR = new THREE.MeshBasicMaterial({
-    color: 0xff0000,
+    color: 0xffffff,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     vertexColors: true,
@@ -147,7 +150,7 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): SandevistanTr
     side: THREE.FrontSide
   });
   const echoMatB = new THREE.MeshBasicMaterial({
-    color: 0x0000ff,
+    color: 0xffffff,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     vertexColors: true,
@@ -179,13 +182,23 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): SandevistanTr
 
   /**
    * Distance-keyed snapshot store. Key = distIndex (integer).
-   * At most MAX_GHOSTS entries kept — we evict old keys beyond the window.
+   * At most MAX_GHOSTS * 2 entries kept — we evict old keys beyond the window.
    */
   const snapshots = new Map<number, Snapshot>();
+
+  /**
+   * Ordered array of active distIndex values, newest last (ascending).
+   * Used for O(visibleCount) lookup in update() — avoid the unbounded backward scan.
+   */
+  const snapshotOrder: number[] = [];
+
   let prevPos = new THREE.Vector3();
   let accumulatedDist = 0;
   let hasFirstPos = false;
   let currentDistIndex = -1;
+
+  /** Last t value seen by record(). Used to detect backward scrubs. */
+  let lastRecordedT = -1;
 
   // Reusable temporaries
   const tmpPos = new THREE.Vector3();
@@ -193,9 +206,28 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): SandevistanTr
   const tmpColor = new THREE.Color();
 
   // -------------------------------------------------------------------------
+  // reset() — clear all accumulated state
+  // -------------------------------------------------------------------------
+  function reset(): void {
+    snapshots.clear();
+    snapshotOrder.length = 0;
+    accumulatedDist = 0;
+    hasFirstPos = false;
+    currentDistIndex = -1;
+    lastRecordedT = -1;
+  }
+
+  // -------------------------------------------------------------------------
   // record()
   // -------------------------------------------------------------------------
-  function record(worldMatrix: THREE.Matrix4, _t: number): void {
+  function record(worldMatrix: THREE.Matrix4, t: number): void {
+    // Scrub-safety: if t decreased (backward scrub) or this is the first call,
+    // clear all accumulated state so a forward replay rebuilds identically.
+    if (t < lastRecordedT) {
+      reset();
+    }
+    lastRecordedT = t;
+
     matrixPosition(worldMatrix, tmpPos);
 
     if (!hasFirstPos) {
@@ -216,11 +248,14 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): SandevistanTr
         distIndex: newDistIndex,
         matrix: worldMatrix.clone()
       });
+      snapshotOrder.push(newDistIndex);
 
       // Prune snapshots that are too far back to ever be displayed (keep MAX_GHOSTS * 2 for safety)
       const keepFrom = newDistIndex - MAX_GHOSTS * 2;
-      for (const key of snapshots.keys()) {
-        if (key < keepFrom) snapshots.delete(key);
+      // Remove from ordered array (prune from front)
+      while (snapshotOrder.length > 0 && snapshotOrder[0] < keepFrom) {
+        const evicted = snapshotOrder.shift()!;
+        snapshots.delete(evicted);
       }
     }
   }
@@ -239,21 +274,17 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): SandevistanTr
     const visibleCount = mode === 'ride' ? RIDE_COUNT : FINALE_COUNT;
     const isFinale = mode === 'finale';
 
-    // Collect the most recent snapshots up to currentDistIndex, sorted newest-first
-    // Grab distIndex values in descending order from the current position
+    // Collect the most recent snapshots up to currentDistIndex, newest-first.
+    // snapshotOrder is ascending (oldest first), so read from the end.
+    // This is O(visibleCount) — no unbounded backward scan.
+    const orderLen = snapshotOrder.length;
     const availableIndices: number[] = [];
-    for (let i = currentDistIndex; i >= 0 && availableIndices.length < visibleCount; i--) {
-      if (snapshots.has(i)) {
-        availableIndices.push(i);
-      }
+    for (let i = orderLen - 1; i >= 0 && availableIndices.length < visibleCount; i--) {
+      availableIndices.push(snapshotOrder[i]);
     }
 
     const count = availableIndices.length;
     mesh.count = count;
-
-    // We need to scan up to MAX_GHOSTS * 2 back if snapshots are sparse
-    // (because we only record every 1.6m, but we might not have RIDE_COUNT yet)
-    // The loop above is fine — it naturally gives us however many we have.
 
     for (let i = 0; i < count; i++) {
       const idx = availableIndices[i];
@@ -317,7 +348,8 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): SandevistanTr
       applyLateralOffsetToMatrix(matB, -ECHO_LATERAL_OFFSET);
       echoMeshB.setMatrixAt(i, matB);
 
-      // Echo brightness: scaled from main ghost brightness
+      // Echo brightness: scaled from main ghost brightness.
+      // Per-instance color carries pure R / pure B — echoMat{R,B} color is 0xffffff (neutral).
       const brightness = isFinale
         ? THREE.MathUtils.lerp(0.7, 0.08, tGhost) * 0.5
         : THREE.MathUtils.lerp(0.55, 0.05, tGhost) * 0.5;
@@ -334,7 +366,7 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): SandevistanTr
     if (echoMeshB.instanceColor) echoMeshB.instanceColor.needsUpdate = true;
   }
 
-  return { group, record, setMode, update };
+  return { group, record, setMode, update, reset };
 }
 
 // ---------------------------------------------------------------------------
