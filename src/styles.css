@@ -8,10 +8,14 @@
   --moonlight: #f5f0e6;
 }
 
-html {
+html, body {
+  margin: 0;
+  padding: 0;
   background: var(--void);
   font-family: 'Rajdhani', sans-serif;
   color: var(--moonlight);
+  /* Allow scroll for the 1450vh hero section */
+  overflow-x: hidden;
 }
 
 .display {
@@ -22,24 +26,33 @@ html {
   font-family: 'Share Tech Mono', monospace;
 }
 
+/* ------------------------------------------------------------------ */
+/* Hero: 1450vh tall so ScrollTrigger has room to pin + scrub          */
+/* ------------------------------------------------------------------ */
+
 #hero {
-  height: 100vh;
+  /* Height drives the scroll distance — ScrollTrigger pins the canvas. */
+  height: 1450vh;
   width: 100vw;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
+  position: relative;
+  overflow: visible;
 }
 
-canvas {
+/* Canvas: fixed-fill so it always covers the viewport while #hero scrolls */
+canvas#stage {
   display: block;
-  width: 100%;
-  height: 100%;
+  width: 100vw;
+  height: 100vh;
   position: fixed;
   top: 0;
   left: 0;
+  z-index: 1;
 }
 
-body {
+/* Post-hero content sits below the hero scroll. */
+#post-hero {
+  position: relative;
+  z-index: 2;
   margin: 0;
   padding: 0;
 }
@@ -47,4 +60,73 @@ body {
 main {
   margin: 0;
   padding: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Loader overlay                                                       */
+/* ------------------------------------------------------------------ */
+
+#loader {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--void);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2.5rem;
+
+  /* Fade-out transition triggered by .loader-hidden */
+  opacity: 1;
+  transition: opacity 400ms ease-out;
+}
+
+#loader.loader-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Wordmark with idle RGB-split glitch */
+#loader-wordmark {
+  font-family: 'Unbounded', sans-serif;
+  font-size: clamp(2.5rem, 8vw, 5rem);
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: var(--moonlight);
+  position: relative;
+
+  /* RGB-split glitch as two text-shadows offset by ±3px laterally */
+  text-shadow:
+    -3px 0 0 rgba(255, 43, 214, 0.55),  /* magenta shadow, left */
+     3px 0 0 rgba(0, 240, 255, 0.55);   /* cyan shadow, right */
+
+  animation: loader-glitch 3.2s steps(1) infinite;
+}
+
+@keyframes loader-glitch {
+  0%   { text-shadow: -3px 0 0 rgba(255, 43, 214, 0.55), 3px 0 0 rgba(0, 240, 255, 0.55); }
+  8%   { text-shadow:  3px 0 0 rgba(255, 43, 214, 0.70), -4px 0 0 rgba(0, 240, 255, 0.70); }
+  10%  { text-shadow: -3px 0 0 rgba(255, 43, 214, 0.55), 3px 0 0 rgba(0, 240, 255, 0.55); }
+  48%  { text-shadow: -3px 0 0 rgba(255, 43, 214, 0.55), 3px 0 0 rgba(0, 240, 255, 0.55); }
+  50%  { text-shadow:  4px 1px 0 rgba(255, 43, 214, 0.80), -3px -1px 0 rgba(0, 240, 255, 0.80); }
+  52%  { text-shadow: -3px 0 0 rgba(255, 43, 214, 0.55), 3px 0 0 rgba(0, 240, 255, 0.55); }
+  100% { text-shadow: -3px 0 0 rgba(255, 43, 214, 0.55), 3px 0 0 rgba(0, 240, 255, 0.55); }
+}
+
+/* Respect prefers-reduced-motion: remove glitch animation */
+@media (prefers-reduced-motion: reduce) {
+  #loader-wordmark {
+    animation: none;
+    text-shadow: none;
+  }
+}
+
+/* Progress readout */
+#loader-readout {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: clamp(0.8rem, 2vw, 1.1rem);
+  letter-spacing: 0.12em;
+  color: var(--tron-cyan);
+  opacity: 0.9;
 }
