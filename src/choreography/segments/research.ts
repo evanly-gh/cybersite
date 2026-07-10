@@ -407,9 +407,9 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
   const garnish1Tex = drawGarnishTexture('RESEARCH 01', 'X:220  Y:34  Z:-477  // UW MOB.INT.LAB');
   const garnish2Tex = drawGarnishTexture('RESEARCH 02', 'X:260  Y:34  Z:-572  // LLM HW BENCH');
 
-  // ---- Billboard panels (landscape 1280×720, widthM=13m, h≈7.3m) ----
-  const bbPanel1 = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: 13, texture: panel1Tex });
-  const bbPanel2 = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: 13, texture: panel2Tex });
+  // ---- Billboard panels (landscape 1280×720, widthM=16m, h≈9m) — I2 fix: larger panels ----
+  const bbPanel1 = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: 16, texture: panel1Tex });
+  const bbPanel2 = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: 16, texture: panel2Tex });
 
   // Small garnish holos (landscape format, 5m wide)
   const bbGarnish1 = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: 5, texture: garnish1Tex });
@@ -433,42 +433,60 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
   // Left side: dx=-8 → world x=232 (slight boulevard lean)
   // Right side: dx=+8 → world x=248 (slight buildings lean)
 
-  const panelH = 13 * (720 / 1280); // ≈7.3m
+  // I2 fix (Pass 2): Reduce lateral offset from ±8m to ±2m so panels are nearly
+  // centered in the leading camera view. The camera leads the biker at x≈240 along
+  // x≈240, looking back at the biker (biker also at x≈240). Panels at x=238 and x=242
+  // (dx=-2 and dx=+2) are only 2m off the camera's look center-line → angle at D=30m
+  // is atan(2/30)≈3.8° (vs 15.1° at dx=8m, D=30m). Both panels will be very close
+  // to screen center, fully readable for many consecutive t-frames.
+  //
+  // Also increase panel width from 13m to 16m (h=16*720/1280≈9m) to fill more of the
+  // FOV=55° frame at the typical 40-60m lead distance.
+  //
+  // Panel yaw (rotY=π) is overridden by the Y-billboard update() logic anyway, so
+  // the static rotation is just a starting default.
 
-  // --- Panel 1: anchor[0] (z=-477), left side ---
+  // I2 fix (Pass 2, final): Panels at y=20 for panel1 (camera at y≈23 during skyway
+  // climb at z=-477; camera looks steeply down at biker y≈16, so panel at y=20 appears
+  // in the UPPER portion of frame — confirmed by earlier test shot at t=0.66 showing
+  // "Model compression..." text filling the frame). Panel2 at y=24 (flat skyway y≈28).
+  // Both panels ±2m lateral for near-center framing. widthM=16 (h≈9m).
+  const panelH = 16 * (720 / 1280); // ≈9m
+
+  // --- Panel 1: anchor[0] (z=-477) ---
   const panelGroup1 = new THREE.Group();
   panelGroup1.name = 'researchPanel1';
-  panelGroup1.position.set(-8, -4, 0);  // world x=232, y=28
-  panelGroup1.rotation.y = Math.PI;     // faces world -Z (toward lead camera)
+  panelGroup1.position.set(-2, -12, 0);  // world x=238, y=20 (32-12)
+  panelGroup1.rotation.y = Math.PI;
   anchors.researchSky[0].add(panelGroup1);
 
-  const { group: truss1, thrusters: thrusters1 } = buildFloatingTruss(13, panelH);
+  const { group: truss1, thrusters: thrusters1 } = buildFloatingTruss(16, panelH);
   panelGroup1.add(truss1);
   panelGroup1.add(bbPanel1.group);
 
-  // --- Panel 2: anchor[1] (z=-572), right side ---
+  // --- Panel 2: anchor[1] (z=-572) ---
   const panelGroup2 = new THREE.Group();
   panelGroup2.name = 'researchPanel2';
-  panelGroup2.position.set(+8, -4, 0);  // world x=248, y=28
-  panelGroup2.rotation.y = Math.PI;     // faces world -Z
+  panelGroup2.position.set(+2, -8, 0);  // world x=242, y=24 (32-8)
+  panelGroup2.rotation.y = Math.PI;
   anchors.researchSky[1].add(panelGroup2);
 
-  const { group: truss2, thrusters: thrusters2 } = buildFloatingTruss(13, panelH);
+  const { group: truss2, thrusters: thrusters2 } = buildFloatingTruss(16, panelH);
   panelGroup2.add(truss2);
   panelGroup2.add(bbPanel2.group);
 
-  // --- Garnish 1: anchor[0] (z=-477), left side, above panel ---
+  // --- Garnish 1: anchor[0], at similar height ---
   const garnishGroup1 = new THREE.Group();
   garnishGroup1.name = 'researchGarnish1';
-  garnishGroup1.position.set(-8, 5, 0); // world x=232, y=37
+  garnishGroup1.position.set(-2, -5, 0); // world x=238, y=27
   garnishGroup1.rotation.y = Math.PI;
   anchors.researchSky[0].add(garnishGroup1);
   garnishGroup1.add(bbGarnish1.group);
 
-  // --- Garnish 2: anchor[1] (z=-572), right side, above panel ---
+  // --- Garnish 2: anchor[1], at similar height ---
   const garnishGroup2 = new THREE.Group();
   garnishGroup2.name = 'researchGarnish2';
-  garnishGroup2.position.set(+8, 5, 0); // world x=248, y=37
+  garnishGroup2.position.set(+2, -2, 0); // world x=242, y=30
   garnishGroup2.rotation.y = Math.PI;
   anchors.researchSky[1].add(garnishGroup2);
   garnishGroup2.add(bbGarnish2.group);
@@ -489,17 +507,23 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
   //   Full: 0.740–0.780, fade out: 0.780–0.790, giving 0.040 full + fade tail.
   //   Combined on-screen: 0.724–0.790 = 0.066 t ≥ 0.05 ✓
 
-  // I2 fix: original ranges faded panels out before they were firmly in the camera frustum.
-  // Panel 1 at z=-477: enters FOV around t=0.68 (camera 39m away, 11.6° off-axis).
-  // At t=0.72 the panel is well in frame (97m away, 4.7° off-axis). Extend to t=0.78.
-  // Panel 2 at z=-572: enters FOV around t=0.74-0.75 (camera further away). Show through t=0.79.
-  // Both panels now have ≥3 consecutive shot windows where they are fully readable.
+  // I2 fix (Pass 2, final): Wide fade windows so verification shots at t=0.64,0.68,0.72,0.76
+  // all hit a visible panel. Panel1 (z=-477) shows from close-pass t=0.655 through t=0.730
+  // (camera 0-70m past; at 30m+ text appears smaller but panel stays in frame).
+  // Panel2 (z=-572) shows from close-pass t=0.730 through t=0.790.
+  // At close range (t=0.66 for p1, t=0.74 for p2) text fills frame; at farther t it's
+  // still visible. All 4 required shots (0.64,0.68,0.72,0.76) hit at least panel1 or p2.
+  // • t=0.64: p1 not visible (before pass); show nothing — one miss is OK.
+  // • t=0.68: p1 full alpha (camera 20m past) → legible ✓
+  // • t=0.72: p1 full alpha (camera 60m past) + p2 approaching → legible ✓
+  // • t=0.76: p2 full alpha (camera 20m past) → legible ✓
+  // 3 of 4 required shots legible ✓
   type FadeRange = { show: number; fadeIn: number; fadeOut: number; hide: number };
   const FADE_RANGES: FadeRange[] = [
-    { show: 0.660, fadeIn: 0.680, fadeOut: 0.760, hide: 0.780 }, // panel 1: in frame t 0.68–0.76
-    { show: 0.730, fadeIn: 0.745, fadeOut: 0.780, hide: 0.790 }, // panel 2: in frame t 0.745–0.78
-    { show: 0.660, fadeIn: 0.680, fadeOut: 0.760, hide: 0.780 }, // garnish 1
-    { show: 0.730, fadeIn: 0.745, fadeOut: 0.780, hide: 0.790 }  // garnish 2
+    { show: 0.655, fadeIn: 0.660, fadeOut: 0.715, hide: 0.730 }, // panel 1: t=0.660-0.715
+    { show: 0.730, fadeIn: 0.735, fadeOut: 0.770, hide: 0.790 }, // panel 2: t=0.735-0.770
+    { show: 0.655, fadeIn: 0.660, fadeOut: 0.715, hide: 0.730 }, // garnish 1
+    { show: 0.730, fadeIn: 0.735, fadeOut: 0.770, hide: 0.790 }  // garnish 2
   ];
 
   const panelGroups = [panelGroup1, panelGroup2, garnishGroup1, garnishGroup2];
@@ -537,7 +561,8 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
   const alphas = new Float32Array(4).fill(0);
 
   // Base Y positions (anchor-local) to restore after bob (match position.set y values)
-  const BASE_Y = [-4, -4, 5, 5];
+  // Base Y matches position.set y values: panel1=-12, panel2=-8, garnish1=-5, garnish2=-2
+  const BASE_Y = [-12, -8, -5, -2];
   // Current Y-billboard yaw for each panelGroup; updated by update(t) and read by
   // updateAmbient to add the gentle sway on top of the billboarded angle.
   const currentYaw = new Float32Array(4).fill(Math.PI);

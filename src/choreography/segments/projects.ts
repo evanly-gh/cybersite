@@ -485,18 +485,18 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
   // Pull back to chase rising toward skyway (t 0.60–0.62)
 
   // Side pose 1: perpendicular fixed pose looking at the +X wall.
-  // I4 fix: moved camera closer (x=205 vs 190) and raised FOV (52 vs 46) so project
-  // displays and the arcing biker both read. Distance 251-205=46m vs 61m original.
-  // The biker arc peaks at y≈14, appearing larger in frame at this tighter angle.
-  const side1Look = new THREE.Vector3(251, 12, -125);
+  // I4 fix (Pass 2): look at x=246 (matches floating panel x=246.5) and y=10 (between
+  // the two panels at y=17 and y=4 → midpoint ≈ y=10.5). Camera looks directly at
+  // the floating holo panels so they appear centered in the fixed side-camera frame.
+  const side1Look = new THREE.Vector3(246, 10, -125);
   const side1Fov = mobile ? 52 + 8 : 52;
   const side1Pos = mobile
     ? new THREE.Vector3(251 - 46 * 1.15, 10, -125)
     : new THREE.Vector3(205, 10, -125);
 
   // Side pose 2: second fixed side pose at ramp2.
-  // I4 fix: same camera pull-in as side1 for consistency.
-  const side2Look = new THREE.Vector3(251, 7, -295);
+  // I4 fix (Pass 2): look at x=246 (floating cards at x=246.5), y=7 (card center y).
+  const side2Look = new THREE.Vector3(246, 7, -295);
   const side2Fov = mobile ? 52 + 8 : 52;
   const side2Pos = mobile
     ? new THREE.Vector3(251 - 46 * 1.15, 9, -295)
@@ -672,23 +672,40 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
     RESUME.projectsMain[1].image.label
   );
 
-  // Landscape billboards 14m wide (h = 14 * 720/1280 ≈ 7.875m)
-  const bbW1Top = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: 14, texture: tttTex });
-  const bbW1Bot = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: 14, texture: rememberMeTex });
-
-  // Cluster-local → world: world = cluster1_world + R(-π/2) * cluster_local
-  //   = (251.5, 8, -125) + (-clz, cly, clx)
-  // So: cluster_local (clx, cly, clz) → world (251.5 - clz, 8 + cly, -125 + clx)
+  // I4 fix (Pass 2): Large vertical-stack layout at clx=0 (world z=-125 = camera look Z).
+  // Panels centered in the horizontal frame (both at clx=0, directly facing the camera).
+  // Camera side1Look now points at y=10 (between the two panels) so BOTH panels fill
+  // the upper and lower halves of the frame.
   //
-  // Arc at z=-125 (camera focal z): y_arc = 14 * 4 * p * (1-p) at p = (z+90)/80 = 35/80 = 0.4375
-  // y_arc ≈ 13.8m at the camera z.
-  // Upper display: center at world y ≈ 21 → cly = 21 - 8 = 13, clx = 0 (z stays at -125)
-  // Lower display: center at world y ≈ 2.5 → cly = 2.5 - 8 = -5.5
-  // Displays at same z as cluster (clx=0) → world z = -125.
-  // Display h ≈ 7.875m: upper spans world y 17.1..24.9 (gap above arc: 17.1 - 13.8 = 3.3m ✓)
-  //                      lower spans world y -1.4..6.4  (gap below arc: 13.8 - 6.4 = 7.4m ✓)
-  bbW1Top.group.position.set(0, 13, 0);    // world y = 8 + 13 = 21, world z = -125
-  bbW1Bot.group.position.set(0, -5.5, 0);  // world y = 8 - 5.5 = 2.5, world z = -125
+  // Cluster-local → world: world = (251.5 - clz, 8 + cly, -125 + clx)
+  //
+  // Upper (TTT-E2E): cly=8 → world y=16.  Panel h=10.1m → spans world y 10.95..21.05.
+  //   At depth 46m, half-vfov≈15°: panel center at 7.4° above cam → at ~26% from top.
+  //   Panel spans screen rows 6% to 46% from top → upper half of frame ✓
+  //
+  // Lower (RememberMe): cly=-3 → world y=5.  Spans world y -0.05..10.05.
+  //   Panel center at 6.2° below cam → at ~70% from top.
+  //   Panel spans screen rows 50% to 90% from top → lower half of frame ✓
+  //
+  // Gap between panels: world y 10.05..10.95 (≈1m) is at frame center (50%) → arc
+  // at y≈13.8 passes through the upper panel (biker in front of it, visually). The
+  // spec says biker is secondary and can thread past/through panels — this is fine.
+  //
+  // Both panels are now LARGE (each ≈40% of frame height) and face the camera directly
+  // (clz=0 → no lateral offset). Title/stack/blurb will be fully legible.
+  // widthM=22: h = 22*(720/1280) ≈ 12.4m. Larger panels fill more of the camera's view.
+  // At 46m distance + FOV=52°: panel spans 50% of frame width, 50% of frame height each.
+  // Both panels together cover ~100% of visible frame — content truly dominates.
+  const bbW1Top = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: 22, texture: tttTex });
+  const bbW1Bot = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: 22, texture: rememberMeTex });
+
+  // Upper panel cly=9 → world y=17, height=12.4m → spans y 10.8..23.2
+  // Lower panel cly=-4 → world y=4, height=12.4m → spans y -2.2..10.2
+  // Gap between: y 10.2..10.8 = 0.6m at frame center y=10
+  // clz=5 → world x=246.5 (5m in front of wall, floating holo-panels).
+  // Camera look-at x=246 points directly at panels → both centered in frame.
+  bbW1Top.group.position.set(0, 9, 5);   // TTT-E2E: world y=17, world x=246.5
+  bbW1Bot.group.position.set(0, -4, 5);  // RememberMe: world y=4, world x=246.5
 
   // Start invisible for glitch-in
   bbW1Top.group.visible = false;
@@ -789,19 +806,20 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
   const bbW2B = buildBillboard(rng, { format: 'square', mount: 'wall', widthM: 8, texture: bellevueTex });
   const bbW2C = buildBillboard(rng, { format: 'square', mount: 'wall', widthM: 8, texture: dubhacksTex });
 
+  // I4 fix (Pass 2): Float cards 5m in front of wall (clz=5 → world x=246.5).
+  // Camera at (205, 9, -295) looking at (246, 7, -295) → frames cards directly.
   // Cluster2-local → world: world = (251.5 - clz, 8 + cly, -295 + clx)
-  // Arc2: z=-260 to -330, apexY=11. Camera at (190, 9, -295), looking at (240, 8, -295).
-  // Arc at z=-295 (camera focal z): p = (295-260)/70 = 0.5 → y_arc = 11*4*0.5*0.5 = 11m (apex).
-  // Three cards below arc. Cards center at world y ≈ 2.5 → cly = 2.5 - 8 = -5.5.
-  // Arc at z=-295 (clx=0): y_arc=11, cards top=2.5+3=5.5 (h=6m), gap=11-5.5=5.5m ✓.
-  // Arrange 3 cards at world z = -275, -295, -315 (20m spacing):
-  //   Card A at world z=-275: clx = -275 - (-295) = 20
-  //   Card B at world z=-295: clx = -295 - (-295) = 0
-  //   Card C at world z=-315: clx = -315 - (-295) = -20
+  // Cards at cly=-1 → world y=7 (camera look-target height).
+  // Arc apex at y=11 → 4m above cards → biker arcs above the 3-card row ✓.
+  // Tighter z-spread ±8m (was 20): cards at world z=-287, -295, -303 for readable size.
+  //   Card A at world z=-287: clx = -287-(-295) = 8
+  //   Card B at world z=-295: clx = 0 (center)
+  //   Card C at world z=-303: clx = -303-(-295) = -8
+  // clz=5 → world x=246.5 (floating panels, background = dark building face)
 
-  bbW2A.group.position.set(20, -5.5, 0);   // world z ≈ -275
-  bbW2B.group.position.set(0, -5.5, 0);    // world z ≈ -295 (center, camera looks here)
-  bbW2C.group.position.set(-20, -5.5, 0);  // world z ≈ -315
+  bbW2A.group.position.set(8, -1, 5);   // world y=7, world z=-287, world x=246.5
+  bbW2B.group.position.set(0, -1, 5);   // world y=7, world z=-295 (center), world x=246.5
+  bbW2C.group.position.set(-8, -1, 5);  // world y=7, world z=-303, world x=246.5
 
   bbW2A.group.visible = false;
   bbW2B.group.visible = false;
