@@ -220,7 +220,12 @@ export interface AboutSegmentOptions {
   updatables: { update(t: number): void }[];
 }
 
-export function registerAboutSegment(opts: AboutSegmentOptions): void {
+export interface AboutSegmentHandle {
+  /** Call from core.onFrame(sec) to animate billboard flicker/scroll/sway every frame. */
+  updateAmbient(sec: number): void;
+}
+
+export function registerAboutSegment(opts: AboutSegmentOptions): AboutSegmentHandle {
   const { rig, bike, anchors } = opts;
 
   // ---- Camera keys ----
@@ -296,7 +301,7 @@ export function registerAboutSegment(opts: AboutSegmentOptions): void {
   ]);
 
   // ---- Displays (browser-only) ----
-  if (typeof document === 'undefined') return;
+  if (typeof document === 'undefined') return { updateAmbient: () => {} };
 
   // Build cluster parent group
   // Parented to aboutWall anchor[1] (world: -80, 6, -11.5, rotY=π/2).
@@ -341,6 +346,22 @@ export function registerAboutSegment(opts: AboutSegmentOptions): void {
   const bb1 = buildBillboard(rng, { format: 'strip',     mount: 'wall', widthM: 24, texture: bannerTex });
   const bb2 = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: 16, texture: paragraphTex });
   const bb3 = buildBillboard(rng, { format: 'portrait',  mount: 'wall', widthM: 5,  texture: faceTex });
+
+  // Fix 2: Portrait+wall has a 50% rng chance of a "flag mount" which bakes a
+  // -π/2 rotation into the screen mesh's quaternion (screen faces +X, edge-on to
+  // the About camera at +Z). The cluster's counter-rotation (-π/2) would then
+  // make a flag-mounted screen face world -Z, fully away from camera.
+  // Solution: after building bb3, find the screen mesh by name and reset its
+  // quaternion to identity so it faces +Z (flush) in cluster-local space.
+  // The structure/glow parts may retain their flag positions — only the screen
+  // facing matters for the portrait display to show its full face to the camera.
+  bb3.group.traverse(o => {
+    const mesh = o as THREE.Mesh;
+    if (mesh.isMesh && mesh.name === 'screen') {
+      mesh.quaternion.identity();
+    }
+  });
+
   const bb4 = buildBillboard(rng, { format: 'square',    mount: 'wall', widthM: 6,  texture: misc0Tex });
   const bb5 = buildBillboard(rng, { format: 'square',    mount: 'wall', widthM: 6,  texture: misc1Tex });
 
@@ -390,7 +411,10 @@ export function registerAboutSegment(opts: AboutSegmentOptions): void {
       if (!mesh.isMesh) return;
       const mat = mesh.material;
       if (Array.isArray(mat)) return;
-      if ((mat as THREE.MeshStandardMaterial).emissiveMap !== undefined && screenMat === null) {
+      // Fix 1: identify the screen material by mesh name ('screen') — not by
+      // emissiveMap presence, because emissiveMap defaults to null, and
+      // null !== undefined is true, which would capture the structure mesh first.
+      if (mesh.name === 'screen' && screenMat === null) {
         screenMat = mat as THREE.MeshStandardMaterial;
       } else if ((mat as THREE.MeshBasicMaterial).blending === THREE.AdditiveBlending && glowMat === null) {
         glowMat = mat as THREE.MeshBasicMaterial;
@@ -412,22 +436,28 @@ export function registerAboutSegment(opts: AboutSegmentOptions): void {
   const SWAY_PHASES = [0, 0.8, 1.6, 2.4, 3.2];
   const SWAY_AMP = 0.4 * (Math.PI / 180); // 0.4° in radians
 
-  // ---- Scroll-driven updatable: fade-in + sway (using wall-clock from Date.now) ----
+  // Track per-display alpha so updateAmbient can blend emissiveIntensity correctly
+  // when the flicker level from buildBillboard is also in play.
+  const alphas = new Float32Array(billboards.length).fill(0);
+
+  // ---- Scroll-driven updatable: fade-in / scale pop only — pure f(t), scrub-safe ----
+  // Does NOT use wall-clock; sway + billboard flicker/scroll moved to updateAmbient.
   opts.updatables.push({
     update(t: number): void {
-      const sec = Date.now() / 1000;
-
       for (let i = 0; i < billboards.length; i++) {
         const [tStart, tEnd] = FADE[i];
         const grp = billboards[i].group;
         const ft = fadeTargets[i];
 
-        let alpha: number;
         if (t < tStart) {
           grp.visible = false;
           grp.scale.setScalar(0.9);
+          alphas[i] = 0;
           continue;
-        } else if (t >= tEnd) {
+        }
+
+        let alpha: number;
+        if (t >= tEnd) {
           grp.visible = true;
           grp.scale.setScalar(1.0);
           alpha = 1.0;
@@ -437,22 +467,53 @@ export function registerAboutSegment(opts: AboutSegmentOptions): void {
           grp.scale.setScalar(0.9 + 0.1 * p);
           alpha = p;
         }
+        alphas[i] = alpha;
 
-        // Emissive intensity fade-in
-        if (ft.screenMat) {
-          ft.screenMat.emissiveIntensity = ft.baseIntensity * alpha;
-        }
+        // Glow opacity fade-in (no flicker on glow, scroll-driven is fine)
         if (ft.glowMat) {
           ft.glowMat.opacity = 0.12 * alpha;
         }
-
-        // Gentle 0.4° ambient sway (wall-clock, not scroll-t)
-        const swayAngle = SWAY_AMP * Math.sin(sec * 0.6 + SWAY_PHASES[i]);
-        grp.rotation.y = swayAngle;
-
-        // Drive buildBillboard's own ambient (flicker + scroll for strip)
-        billboards[i].updateAmbient(sec);
+        // Emissive base fade: set to alpha; updateAmbient multiplies by flicker on top.
+        // If updateAmbient hasn't run yet (server/test env), at least show the screen.
+        if (ft.screenMat) {
+          ft.screenMat.emissiveIntensity = ft.baseIntensity * alpha;
+        }
       }
     }
   });
+
+  // Fix 3: ambient sway + billboard flicker/scroll — frame-driven, not scroll-driven.
+  // Called from core.onFrame(sec) in main.ts (same pattern as city.updateAmbient and
+  // farField.updateAmbient) so these animations keep running during the static hold
+  // (t=0.12–0.26) when the user is not scrolling.
+  function updateAmbient(sec: number): void {
+    for (let i = 0; i < billboards.length; i++) {
+      const grp = billboards[i].group;
+      if (!grp.visible) continue;
+
+      // Gentle 0.4° ambient sway (wall-clock sec, not scroll-t)
+      const swayAngle = SWAY_AMP * Math.sin(sec * 0.6 + SWAY_PHASES[i]);
+      grp.rotation.y = swayAngle;
+
+      // Drive buildBillboard's own ambient (flicker + scroll for strip).
+      // updateAmbient internally may update screenMat.emissiveIntensity *= flickerLevel;
+      // we drive it with the fade alpha already baked into emissiveIntensity from the
+      // scroll updatable — since billboards.updateAmbient multiplies from baseIntensity,
+      // we re-set emissiveIntensity here so flicker composites with fade correctly.
+      const ft = fadeTargets[i];
+      if (ft.screenMat && alphas[i] < 1.0) {
+        // During fade-in: clamp emissiveIntensity so flicker can't exceed fade level.
+        // billboards[i].updateAmbient sets emissiveIntensity = baseIntensity * flickerLevel.
+        // We want emissiveIntensity = baseIntensity * flickerLevel * alphas[i].
+        // Simplest: call updateAmbient first, then scale down.
+        billboards[i].updateAmbient(sec);
+        ft.screenMat.emissiveIntensity *= alphas[i];
+      } else {
+        // Fully faded in: let billboards[i].updateAmbient run normally.
+        billboards[i].updateAmbient(sec);
+      }
+    }
+  }
+
+  return { updateAmbient };
 }

@@ -126,7 +126,7 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
   });
 
   // Register about segment keys (camera + bike + 5 holo displays)
-  registerAboutSegment({
+  const aboutSegment = registerAboutSegment({
     rig,
     bike: bikePath,
     anchors: city.anchors,
@@ -140,10 +140,13 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
   // render synchronously, then the master signals __READY after 2 frames.
   const isShotMode = new URLSearchParams(window.location.search).has('shot');
 
-  // Wire ambient updates (wall-clock) via core.onFrame
+  // Wire ambient updates (wall-clock) via core.onFrame.
+  // Fix 3: about segment's billboard flicker/scroll/sway also driven here so
+  // they animate every frame, including during the static scroll hold (t=0.12–0.26).
   core.onFrame((sec: number) => {
     city.updateAmbient(sec);
     farField.updateAmbient(sec);
+    aboutSegment.updateAmbient(sec);
   });
 
   if (isShotMode) {
