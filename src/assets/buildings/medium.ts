@@ -598,16 +598,17 @@ export function buildOfficeHolo(rng: Rng, floors = 14): THREE.Group {
   group.add(tickerMesh);
   group.add(mergeOne(amberParts, makeGlowMat(COLORS.sodiumAmber, 2.2), 'amber'));
   group.add(mergeOne(tealParts, makeGlowMat(COLORS.holoTeal, 1.8), 'teal'));
+  // Note: removed transmission:0.4 (it triggered an expensive transmissive rendering pass
+  // that multiplied draw calls per officeHolo placement; replaced with simple transparency).
   group.add(
     mergeOne(
       glassParts,
-      new THREE.MeshPhysicalMaterial({
+      new THREE.MeshStandardMaterial({
         color: COLORS.holoTeal,
         transparent: true,
-        opacity: 0.28,
+        opacity: 0.22,
         roughness: 0.1,
-        metalness: 0,
-        transmission: 0.4,
+        metalness: 0.2,
         side: THREE.DoubleSide
       }),
       'glass'

@@ -154,13 +154,13 @@ function findInstancedMesh(root: THREE.Object3D, prefix: string): THREE.Instance
 }
 
 describe('metro: pylons', () => {
-  it('draw-call budget: pylon layer is InstancedMesh/Points groups (zone-split for frustum culling), not one mesh per pylon', () => {
+  it('draw-call budget: pylon layer is InstancedMesh/Points groups (not one mesh per pylon)', () => {
     const m = buildMetro(makeRng(6));
-    // Task 33: pylons are now zone-split (e.g. pylonStruct:about, pylonStruct:shibuya, …)
-    // Verify: at least one pylonStruct-prefixed IM exists, plus pylonStrobes.
+    // Pylons are globally-instanced: one pylonStruct IM covering all near-zone pylons,
+    // plus pylonHazardBase IM, optional pylonGraffiti IM, and pylonStrobes Points.
     const struct = findInstancedMesh(m.group, 'pylonStruct');
     expect(struct).toBeInstanceOf(THREE.InstancedMesh);
-    // Each zone's struct IM holds 4 instances per pylon in that zone — at least 1 pylon.
+    // struct IM holds 4 instances per pylon (column + T-cap + 2 braces) — at least 1 pylon.
     expect(struct!.count).toBeGreaterThan(0);
 
     const hazard = findInstancedMesh(m.group, 'pylonHazardBase');
@@ -172,7 +172,7 @@ describe('metro: pylons', () => {
 
   it('T-cap and strobe sit BELOW the girder underside (pylon-height sign-fix pin)', () => {
     const m = buildMetro(makeRng(6));
-    // Collect ALL zone-split pylonStruct InstancedMeshes.
+    // Collect pylonStruct InstancedMesh(es) — one globally-instanced mesh.
     const structs: THREE.InstancedMesh[] = [];
     m.group.traverse((o) => {
       if ((o as THREE.InstancedMesh).isInstancedMesh && o.name.startsWith('pylonStruct')) {
