@@ -130,3 +130,625 @@ main {
   color: var(--tron-cyan);
   opacity: 0.9;
 }
+
+/* ================================================================== */
+/* POST-HERO: cyberpunk HUD resume sections                            */
+/* ================================================================== */
+
+/* ---- Shared section chrome ---- */
+
+/* Global post-hero background: void + faint city-glow gradient blobs */
+#post-hero {
+  background:
+    radial-gradient(ellipse 55% 35% at 20% 30%, rgba(255, 43, 214, 0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 40% at 75% 70%, rgba(255, 179, 71, 0.03) 0%, transparent 70%),
+    var(--void);
+  /* 1px scanline overlay via repeating-linear-gradient at 2% opacity */
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 1px,
+      rgba(255, 255, 255, 0.02) 1px,
+      rgba(255, 255, 255, 0.02) 2px
+    ),
+    radial-gradient(ellipse 55% 35% at 20% 30%, rgba(255, 43, 214, 0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 40% at 75% 70%, rgba(255, 179, 71, 0.03) 0%, transparent 70%);
+  background-color: var(--void);
+  background-attachment: fixed;
+}
+
+/* Each content section: centered, generous vertical rhythm */
+#post-hero > section {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 8rem 2rem;
+}
+
+/* First section: a bit more top breathing room */
+#post-hero > section:first-child {
+  padding-top: 10rem;
+}
+
+/* Eyebrow: // 01 EDUCATION */
+.ph-eyebrow {
+  font-size: 0.8rem;
+  letter-spacing: 0.18em;
+  color: var(--tron-cyan);
+  margin: 0 0 0.75rem 0;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+/* Section headings: Unbounded, glitch-in on first intersection */
+.ph-heading {
+  font-family: 'Unbounded', serif;
+  font-size: clamp(2.5rem, 6vw, 4rem);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--moonlight);
+  margin: 0 0 4rem 0;
+  line-height: 1.1;
+
+  /* Pre-animation: invisible, slightly offset */
+  opacity: 0;
+  transform: translateY(8px);
+  /* Subtle RGB split before animation fires */
+  text-shadow: none;
+  transition: none;
+  margin: 0 0 3rem 0;
+}
+
+/* Glitch-in: fires once on first intersection */
+.ph-heading--visible {
+  animation: ph-glitch-in 0.6s steps(1) forwards;
+}
+
+@keyframes ph-glitch-in {
+  0%   {
+    opacity: 0;
+    transform: translateY(8px);
+    text-shadow:
+      -4px 0 0 rgba(255, 43, 214, 0.8),
+       4px 0 0 rgba(0, 240, 255, 0.8);
+  }
+  15%  {
+    opacity: 1;
+    transform: translateY(-2px);
+    text-shadow:
+       3px 0 0 rgba(255, 43, 214, 0.6),
+      -3px 0 0 rgba(0, 240, 255, 0.6);
+  }
+  30%  {
+    opacity: 1;
+    transform: translateY(1px);
+    text-shadow:
+      -2px 1px 0 rgba(255, 43, 214, 0.4),
+       2px -1px 0 rgba(0, 240, 255, 0.4);
+  }
+  50%  {
+    opacity: 1;
+    transform: translateY(0);
+    text-shadow:
+      -3px 0 0 rgba(255, 43, 214, 0.5),
+       3px 0 0 rgba(0, 240, 255, 0.5);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    text-shadow:
+      -2px 0 0 rgba(255, 43, 214, 0.3),
+       2px 0 0 rgba(0, 240, 255, 0.3);
+  }
+}
+
+/* Focus ring: 2px cyan outline for all interactive post-hero elements */
+#post-hero a:focus-visible,
+#post-hero button:focus-visible {
+  outline: 2px solid var(--tron-cyan);
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+
+/* ---- Education section ---- */
+#education {}
+
+.ph-edu-card {
+  position: relative;
+  border: 1px solid rgba(0, 240, 255, 0.25);
+  padding: 3rem;
+  background: var(--shadow-blue);
+  overflow: hidden;
+  transition: border-color 0.3s ease;
+}
+
+/* Corner tick marks */
+.ph-corner {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: var(--tron-cyan);
+  border-style: solid;
+  opacity: 0.7;
+}
+
+.ph-corner--tl { top: 0; left: 0; border-width: 2px 0 0 2px; }
+.ph-corner--tr { top: 0; right: 0; border-width: 2px 2px 0 0; }
+.ph-corner--bl { bottom: 0; left: 0; border-width: 0 0 2px 2px; }
+.ph-corner--br { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+
+/* Animated border shimmer on hover */
+.ph-edu-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 240, 255, 0.08) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  transition: transform 0s;
+  pointer-events: none;
+}
+
+.ph-edu-card:hover::after {
+  animation: ph-shimmer 1.4s ease-in-out;
+}
+
+@keyframes ph-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.ph-edu-card:hover {
+  border-color: rgba(0, 240, 255, 0.55);
+}
+
+.ph-edu-school {
+  font-family: 'Unbounded', serif;
+  font-size: clamp(1.3rem, 3vw, 1.8rem);
+  font-weight: 700;
+  color: var(--moonlight);
+  margin: 0 0 1.25rem 0;
+  letter-spacing: 0.04em;
+}
+
+.ph-edu-degrees {
+  list-style: none;
+  margin: 0 0 1rem 0;
+  padding: 0;
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.ph-edu-degrees li {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 1.05rem;
+  color: var(--holo-teal);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.ph-edu-honors {
+  font-size: 0.85rem;
+  color: var(--sodium-amber);
+  letter-spacing: 0.1em;
+  margin: 0 0 2rem 0;
+}
+
+.ph-edu-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 3rem;
+  flex-wrap: wrap;
+  margin-bottom: 2.5rem;
+}
+
+.ph-edu-grad {
+  font-size: 0.85rem;
+  color: var(--moonlight);
+  opacity: 0.65;
+  letter-spacing: 0.12em;
+  margin: 0;
+}
+
+.ph-edu-gpa-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.ph-edu-gpa-label {
+  font-size: 0.75rem;
+  color: var(--tron-cyan);
+  letter-spacing: 0.15em;
+  opacity: 0.7;
+}
+
+.ph-edu-gpa-value {
+  font-size: clamp(2rem, 4vw, 2.8rem);
+  color: var(--tron-cyan);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-shadow: 0 0 20px rgba(0, 240, 255, 0.4);
+}
+
+.ph-cw-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.18em;
+  color: var(--tron-cyan);
+  opacity: 0.6;
+  margin: 0 0 0.75rem 0;
+}
+
+.ph-cw-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+
+.ph-cw-list li {
+  font-size: 0.82rem;
+  color: var(--moonlight);
+  opacity: 0.7;
+  letter-spacing: 0.08em;
+}
+
+.ph-cw-list li::before {
+  content: '› ';
+  color: var(--tron-cyan);
+  opacity: 0.7;
+}
+
+/* ---- Skills section ---- */
+#skills {}
+
+.ph-skills-grid {
+  display: grid;
+  /* 5 equal columns on wide screens, wraps gracefully on narrow */
+  grid-template-columns: repeat(5, 1fr);
+  gap: 2.5rem 2rem;
+}
+
+@media (max-width: 1000px) {
+  .ph-skills-grid {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+}
+
+.ph-skill-group {
+  transition: opacity 0.2s ease;
+}
+
+.ph-skill-group--dim {
+  opacity: 0.4;
+}
+
+.ph-skill-group--active {}
+
+.ph-skill-cat {
+  font-size: 0.75rem;
+  letter-spacing: 0.18em;
+  color: var(--sodium-amber);
+  text-transform: uppercase;
+  margin: 0 0 1rem 0;
+  font-weight: normal;
+}
+
+.ph-chip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ph-chip {
+  display: contents;
+}
+
+.ph-chip-btn {
+  background: var(--shadow-blue);
+  border: 1px solid var(--holo-teal);
+  color: var(--moonlight);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  padding: 0 0.9rem;
+  min-height: 44px;
+  min-width: 44px;
+  cursor: pointer;
+  transition:
+    box-shadow 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease;
+  border-radius: 0;
+}
+
+.ph-chip-btn:hover,
+.ph-chip-btn:focus-visible {
+  border-color: var(--tron-cyan);
+  color: var(--tron-cyan);
+  box-shadow:
+    0 0 0 1px var(--tron-cyan),
+    0 0 12px rgba(0, 240, 255, 0.35),
+    0 0 24px rgba(0, 240, 255, 0.15);
+  outline: none;
+}
+
+/* ---- Experience section ---- */
+#experience {}
+
+/* Vertical timeline */
+.ph-timeline {
+  list-style: none;
+  margin: 0 0 6rem 0;
+  padding: 0;
+  position: relative;
+}
+
+/* Teal rail */
+.ph-timeline::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--tron-cyan) 5%,
+    var(--tron-cyan) 95%,
+    transparent
+  );
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.35);
+}
+
+.ph-timeline-item {
+  position: relative;
+  padding: 0 0 3.5rem 3.5rem;
+  display: flex;
+  gap: 0;
+  align-items: flex-start;
+}
+
+.ph-timeline-item:last-child {
+  padding-bottom: 0;
+}
+
+/* Glowing node on the rail */
+.ph-timeline-node {
+  position: absolute;
+  left: -5px;
+  top: 6px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--tron-cyan);
+  box-shadow:
+    0 0 0 2px var(--void),
+    0 0 0 3px var(--tron-cyan),
+    0 0 10px rgba(0, 240, 255, 0.6);
+  flex-shrink: 0;
+}
+
+.ph-timeline-content {
+  flex: 1;
+}
+
+.ph-timeline-role {
+  font-family: 'Unbounded', serif;
+  font-size: clamp(1rem, 2.5vw, 1.3rem);
+  font-weight: 700;
+  color: var(--moonlight);
+  margin: 0 0 0.4rem 0;
+  letter-spacing: 0.03em;
+}
+
+.ph-timeline-org {
+  font-size: 0.82rem;
+  color: var(--tron-cyan);
+  letter-spacing: 0.1em;
+  margin: 0 0 0.75rem 0;
+  opacity: 0.85;
+}
+
+.ph-timeline-detail {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 0.95rem;
+  color: var(--moonlight);
+  opacity: 0.7;
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* Achievements strip */
+.ph-ach-strip {
+  list-style: none;
+  margin: 2rem 0 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.5rem;
+}
+
+.ph-ach-card {
+  background: var(--shadow-blue);
+  border: 1px solid rgba(255, 43, 214, 0.3);
+  padding: 2rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ph-ach-card:hover {
+  border-color: rgba(255, 43, 214, 0.65);
+  box-shadow: 0 0 16px rgba(255, 43, 214, 0.12);
+}
+
+.ph-ach-chevron {
+  font-size: 1.8rem;
+  color: var(--signal-magenta);
+  line-height: 1;
+  display: block;
+}
+
+.ph-ach-caption {
+  font-size: 0.82rem;
+  color: var(--moonlight);
+  letter-spacing: 0.1em;
+  margin: 0;
+  opacity: 0.85;
+  line-height: 1.6;
+}
+
+/* ---- Contact section ---- */
+#contact {
+  border-top: 1px solid rgba(0, 240, 255, 0.12);
+}
+
+.ph-contact-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  margin-bottom: 4rem;
+}
+
+.ph-contact-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* Neon-sign wordmark links */
+.ph-contact-link {
+  font-family: 'Unbounded', serif;
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--tron-cyan);
+  text-decoration: none;
+  display: inline-block;
+  text-shadow:
+    0 0 10px rgba(0, 240, 255, 0.5),
+    0 0 30px rgba(0, 240, 255, 0.2);
+  transition: color 0.15s ease;
+}
+
+/* Flicker animation on hover via CSS steps() */
+.ph-contact-link.ph-flicker:hover {
+  animation: ph-neon-flicker 0.4s steps(1) forwards;
+  color: var(--moonlight);
+  text-shadow:
+    0 0 6px rgba(0, 240, 255, 0.9),
+    0 0 20px rgba(0, 240, 255, 0.6),
+    0 0 50px rgba(0, 240, 255, 0.3);
+}
+
+@keyframes ph-neon-flicker {
+  0%   { opacity: 1; }
+  10%  { opacity: 0.6; }
+  15%  { opacity: 1; }
+  25%  { opacity: 0.8; }
+  30%  { opacity: 0.3; }
+  35%  { opacity: 1; }
+  60%  { opacity: 0.9; }
+  65%  { opacity: 0.5; }
+  70%  { opacity: 1; }
+  100% { opacity: 1; }
+}
+
+.ph-contact-sub {
+  font-size: 0.82rem;
+  color: var(--moonlight);
+  opacity: 0.5;
+  letter-spacing: 0.12em;
+  margin: 0;
+}
+
+/* Footer */
+.ph-footer {
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  color: var(--moonlight);
+  opacity: 0.35;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 2rem;
+  margin-top: 2rem;
+  text-align: center;
+}
+
+/* ---- Reduced motion overrides ---- */
+@media (prefers-reduced-motion: reduce) {
+  .ph-heading {
+    animation: none;
+    opacity: 1;
+    transform: none;
+    text-shadow: none;
+  }
+
+  .ph-heading--visible {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .ph-edu-card:hover::after {
+    animation: none;
+  }
+
+  .ph-contact-link.ph-flicker:hover {
+    animation: none;
+  }
+}
+
+/* ---- Mobile responsive ---- */
+@media (max-width: 640px) {
+  #post-hero > section {
+    padding: 6rem 1.25rem;
+  }
+
+  .ph-edu-card {
+    padding: 2rem 1.25rem;
+  }
+
+  .ph-skills-grid {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+
+  .ph-edu-degrees {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .ph-edu-meta {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .ph-contact-links {
+    gap: 2.5rem;
+  }
+
+  .ph-ach-strip {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .ph-timeline::before {
+    left: 0;
+  }
+
+  .ph-timeline-item {
+    padding-left: 2.5rem;
+  }
+}

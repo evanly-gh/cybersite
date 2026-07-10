@@ -38,6 +38,9 @@ import { registerFinaleSegment } from './choreography/segments/finale';
 // Loader
 import { createLoader } from './ui/loader';
 
+// Post-hero DOM sections
+import { renderPostHero } from './ui/postHero';
+
 /**
  * Boot the real scroll-driven hero scene.
  * Replaces the temporary sanity scene (Task 4) with the full world.
@@ -273,6 +276,9 @@ function boot(): void {
   // Task 23: site-wide cursor trail (sandevistan RGB-split). Self-disables on
   // touch (pointer:coarse) and prefers-reduced-motion — no config needed here.
   initCursorTrail();
+
+  // Task 32: render post-hero DOM sections (Education, Skills, Experience, Contact)
+  renderPostHero();
 
   console.log('boot ok');
 }
