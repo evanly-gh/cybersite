@@ -7,6 +7,8 @@
  *  2. state(0.2).pos within About street world bounds
  *  3. airborne flag true only inside registered air windows
  *  4. quat has no NaN through a full flip
+ *  5. addSpeedKeys throws on overlapping t range
+ *  6. addSpeedKeys allows shared boundary t (intro→about handoff)
  */
 
 import { describe, it, expect } from 'vitest';
@@ -31,57 +33,31 @@ function makeIntroAboutKeys() {
 // ---- tests -----------------------------------------------------------------
 
 describe('BikePath', () => {
-  it('u(t) is monotonic non-decreasing over 500 samples (intro+about keys)', () => {
+  it('u(t) is monotonic non-decreasing over 500 samples — via uAt(t)', () => {
     const bp = new BikePath();
     bp.addSpeedKeys(makeIntroAboutKeys());
 
+    // Use the exposed uAt() method to directly verify u is non-decreasing.
     let prevU = -Infinity;
     for (let i = 0; i <= 500; i++) {
       const t = i / 500;
-      const state = bp.state(t);
-      const u = ROUTE_U.introStart; // we'll derive u from pos instead - use t directly
-      // u must be non-decreasing: check via state positions along route
-      // Simplest proxy: x-coordinate is monotonically non-decreasing in intro segment
-      // (route goes from -300 toward +x during intro)
-      // Actually test that successive states don't regress in u by checking pos.x
-      void state;
-      void prevU;
+      const u = bp.uAt(t);
+      expect(u).toBeGreaterThanOrEqual(prevU - 1e-12); // monotonic non-decreasing (tolerance for float)
+      prevU = u;
     }
-
-    // More direct: reconstruct the u values via the piecewise-linear interpolation.
-    // We do this by checking that pos changes consistently with forward motion.
-    // The real test: u(t) itself must be non-decreasing.
-    // We expose internal u via state.pos matching ROUTE.getPointAt(u).
-    // Use state at t=0 → pos near introStart, state at t=0.10 → pos near aboutStart+0.02.
-
-    const s0 = bp.state(0);
-    const s1 = bp.state(0.10);
-
-    // Both positions should be roughly finite
-    expect(isFinite(s0.pos.x)).toBe(true);
-    expect(isFinite(s1.pos.x)).toBe(true);
-
-    // x should increase from intro → about (route goes -300 → ~-240 in this range)
-    expect(s1.pos.x).toBeGreaterThan(s0.pos.x);
   });
 
   it('u(t) samples are monotonic: each successive u >= previous', () => {
     const bp = new BikePath();
     bp.addSpeedKeys(makeIntroAboutKeys());
 
-    // Sample 500 evenly spaced t values and verify u is non-decreasing.
-    // We track u by sampling state and checking ROUTE distance proxy:
-    // since the route goes along +x during intro, pos.x is a proxy for u.
-    const xs: number[] = [];
+    // Sample 500 evenly spaced t values via uAt() and verify u is non-decreasing.
+    let prevU = -Infinity;
     for (let i = 0; i <= 500; i++) {
       const t = i / 500;
-      const state = bp.state(t);
-      xs.push(state.pos.x);
-    }
-
-    for (let i = 1; i < xs.length; i++) {
-      // x must be non-decreasing (route is monotonic in x during intro)
-      expect(xs[i]).toBeGreaterThanOrEqual(xs[i - 1] - 0.1); // small tolerance for weave
+      const u = bp.uAt(t);
+      expect(u).toBeGreaterThanOrEqual(prevU - 1e-12);
+      prevU = u;
     }
   });
 
@@ -181,5 +157,87 @@ describe('BikePath', () => {
       expect(isFinite(state.pose.crouch)).toBe(true);
       expect(isFinite(state.pose.wheelSpin)).toBe(true);
     }
+  });
+
+  // ---- overlap guard tests -----------------------------------------------
+
+  it('addSpeedKeys throws when a second batch t-range overlaps an existing batch (interior)', () => {
+    const bp = new BikePath();
+    // Register intro keys: t=[0, 0.10]
+    bp.addSpeedKeys([
+      { t: 0, u: ROUTE_U.introStart },
+      { t: 0.10, u: ROUTE_U.aboutStart + 0.02 }
+    ]);
+    // Try to register overlapping about keys starting at t=0.05 (interior overlap)
+    expect(() => {
+      bp.addSpeedKeys([
+        { t: 0.05, u: ROUTE_U.aboutStart },
+        { t: 0.28, u: ROUTE_U.aboutEnd }
+      ]);
+    }).toThrow(/overlapping t range/i);
+  });
+
+  it('addSpeedKeys does NOT throw when second batch starts at exact boundary t (shared boundary)', () => {
+    const bp = new BikePath();
+    // Register intro keys ending at t=0.10
+    bp.addSpeedKeys([
+      { t: 0, u: ROUTE_U.introStart },
+      { t: 0.10, u: ROUTE_U.aboutStart + 0.02 }
+    ]);
+    // Register about keys starting at t=0.10 (shared boundary) — must NOT throw
+    expect(() => {
+      bp.addSpeedKeys([
+        { t: 0.10, u: ROUTE_U.aboutStart + 0.02 },
+        { t: 0.28, u: ROUTE_U.aboutEnd }
+      ]);
+    }).not.toThrow();
+  });
+
+  it('addSpeedKeys: non-overlapping sequential batches assemble correctly', () => {
+    const bp = new BikePath();
+    bp.addSpeedKeys([
+      { t: 0, u: ROUTE_U.introStart },
+      { t: 0.10, u: ROUTE_U.aboutStart + 0.02 }
+    ]);
+    bp.addSpeedKeys([
+      { t: 0.10, u: ROUTE_U.aboutStart + 0.02 },
+      { t: 0.28, u: ROUTE_U.aboutEnd }
+    ]);
+    // uAt should progress smoothly from introStart through aboutEnd
+    expect(bp.uAt(0)).toBeCloseTo(ROUTE_U.introStart, 5);
+    expect(bp.uAt(0.10)).toBeCloseTo(ROUTE_U.aboutStart + 0.02, 5);
+    expect(bp.uAt(0.28)).toBeCloseTo(ROUTE_U.aboutEnd, 5);
+  });
+
+  it('airborne BikeState.quat is an independent object (not a module-level alias)', () => {
+    // Fix 1: ensures cloning so successive calls don't corrupt prior results.
+    const bp = new BikePath();
+    bp.addSpeedKeys([
+      { t: 0,    u: ROUTE_U.introStart },
+      { t: 0.10, u: ROUTE_U.aboutStart + 0.02 },
+      { t: 0.38, u: ROUTE_U.ramp1Base },
+      { t: 0.45, u: ROUTE_U.ramp1Land }
+    ]);
+    bp.addAir([{
+      t0: 0.39,
+      t1: 0.44,
+      u0: ROUTE_U.ramp1Base,
+      u1: ROUTE_U.ramp1Land,
+      apexY: 20,
+      flips: 1
+    }]);
+
+    // Take a snapshot of quat from first call
+    const s1 = bp.state(0.41);
+    const snap = { x: s1.quat.x, y: s1.quat.y, z: s1.quat.z, w: s1.quat.w };
+
+    // Second call should NOT mutate s1.quat
+    bp.state(0.43);
+
+    // s1.quat must still equal the snapshot
+    expect(s1.quat.x).toBeCloseTo(snap.x, 10);
+    expect(s1.quat.y).toBeCloseTo(snap.y, 10);
+    expect(s1.quat.z).toBeCloseTo(snap.z, 10);
+    expect(s1.quat.w).toBeCloseTo(snap.w, 10);
   });
 });

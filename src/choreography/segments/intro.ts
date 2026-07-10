@@ -95,10 +95,13 @@ function drawIntroPanel(): THREE.CanvasTexture {
 /**
  * Build the in-world intro title as a flat panel mesh parented to the anchor.
  * Returns the mesh so the master can key its material.opacity over t=0.03–0.05.
+ *
+ * The panel is sized to be readable from the t=0 overhead camera (~440 world units
+ * away). 200×80 world units fills roughly half the horizontal field at that distance.
  */
 function buildIntroPanelMesh(texture: THREE.Texture): THREE.Mesh {
-  const W = 30; // metres wide
-  const H = 12; // metres tall
+  const W = 200; // metres wide — legible from t=0 overhead camera (~440u away)
+  const H = 80;  // metres tall (maintains ~2.4:1 aspect ratio of the canvas)
   const geom = new THREE.PlaneGeometry(W, H);
   const mat = new THREE.MeshBasicMaterial({
     map: texture,
@@ -178,10 +181,27 @@ export function registerIntroSegment(opts: IntroSegmentOptions): void {
     const texture = drawIntroPanel();
     const mesh = buildIntroPanelMesh(texture);
 
-    // Mount to the introOverhead anchor
+    // Mount to the introOverhead anchor (world position: introStart.x+20, 15, 0 = -280, 15, 0).
+    // The t=0 camera is at (120, 190, -60) looking at (-260, 0, 0).
+    //
+    // Strategy: place the panel near the camera's look-at center and face it toward the camera.
+    // The panel is offset in anchor-local space to sit near the look-at point (slightly elevated).
+    // Anchor local offset: look-at (-260,0,0) relative to anchor (-280,15,0) = (20,-15,0).
+    // Raise by 60 world units so it sits at mid-height in the overhead view: (20, 45, 0).
+    mesh.position.set(20, 45, 0);
+
+    // Direction from the mesh's world position to the t=0 camera.
+    // Mesh world pos ≈ (-280+20, 15+45, 0) = (-260, 60, 0)
+    const meshWorldPos = new THREE.Vector3(-260, 60, 0);
+    const cameraPos = new THREE.Vector3(120, 190, -60);
+    const toCamera = new THREE.Vector3().subVectors(cameraPos, meshWorldPos).normalize();
+    // PlaneGeometry normal is +Z; rotate so +Z aligns with toCamera direction.
+    const panelQuat = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1),
+      toCamera
+    );
+    mesh.quaternion.copy(panelQuat);
     const anchor = anchors.introOverhead;
-    // Orient to face the camera approach direction (face south = +Z direction)
-    mesh.rotation.y = 0; // facing +Z by default (plane normal = +Z)
     anchor.add(mesh);
 
     const mat = mesh.material as THREE.MeshBasicMaterial;

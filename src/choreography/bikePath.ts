@@ -68,7 +68,6 @@ const _tmpPos = new THREE.Vector3();
 const _tmpTangent = new THREE.Vector3();
 const _tmpRight = new THREE.Vector3();
 const _tmpUp = new THREE.Vector3(0, 1, 0);
-const _tmpQuat = new THREE.Quaternion();
 const _tmpAxisAngle = new THREE.Quaternion();
 
 // ---------------------------------------------------------------------------
@@ -164,6 +163,15 @@ export class BikePath {
       }
       this.airWindows.push(w);
     }
+  }
+
+  /**
+   * Returns the arc-length parameter u at scroll progress t.
+   * u is monotonic non-decreasing by construction of the piecewise-linear speed keys.
+   * Exposed for testability.
+   */
+  uAt(t: number): number {
+    return plerpU(this.speedKeys, Math.max(0, Math.min(1, t)));
   }
 
   /**
@@ -298,8 +306,9 @@ export class BikePath {
     const baseQuat = new THREE.Quaternion().setFromRotationMatrix(baseRot);
 
     // Apply pitch about local lateral axis (rider's right = +Z in bike space = _tmpRight world)
+    // Clone into a fresh Quaternion so BikeState.quat is never an alias of the module-level temp.
     _tmpAxisAngle.setFromAxisAngle(_tmpRight, pitch);
-    const quat = _tmpAxisAngle.multiply(baseQuat);
+    const quat = _tmpAxisAngle.clone().multiply(baseQuat);
 
     // u for wheel spin (held at u0 during air)
     const arcLength = uClamped * ROUTE_ARC_LENGTH;
