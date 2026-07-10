@@ -15,6 +15,10 @@ export interface Core {
   start(): void;
   setQuality(tier: 0 | 1 | 2): void;
   quality: 0 | 1 | 2;
+  /** Set UnrealBloomPass strength at runtime (scrub-safe; call from update(t)). */
+  setBloomStrength(s: number): void;
+  /** Set renderer tone-mapping exposure at runtime (scrub-safe; call from update(t)). */
+  setExposure(e: number): void;
 }
 
 /** Scene-wide FogExp2 density. Exported so custom ShaderMaterials that replicate the
@@ -200,6 +204,12 @@ export function initCore(canvas: HTMLCanvasElement): Core {
     },
     get quality(): 0 | 1 | 2 {
       return quality;
+    },
+    setBloomStrength(s: number): void {
+      bloomPass.strength = s;
+    },
+    setExposure(e: number): void {
+      renderer.toneMappingExposure = e;
     }
   };
 

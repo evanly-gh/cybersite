@@ -32,6 +32,7 @@ import { registerAboutSegment } from './choreography/segments/about';
 import { registerDriftSegment } from './choreography/segments/drift';
 import { registerProjectsSegment } from './choreography/segments/projects';
 import { registerResearchSegment } from './choreography/segments/research';
+import { registerFinaleSegment } from './choreography/segments/finale';
 
 // Loader
 import { createLoader } from './ui/loader';
@@ -157,6 +158,15 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
     anchors: city.anchors,
     updatables
   });
+
+  // Register finale segment (moonlit bridge run, t 0.79–1.0)
+  const finaleSegment = registerFinaleSegment({
+    rig,
+    bike: bikePath,
+    sandevistan,
+    core,
+    updatables
+  });
   loader.setProgress(90);
 
   loader.setProgress(100);
@@ -174,6 +184,7 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
     aboutSegment.updateAmbient(sec);
     projectsSegment.updateAmbient(sec);
     researchSegment.updateAmbient(sec);
+    finaleSegment.updateAmbient(sec);
   });
 
   if (isShotMode) {
