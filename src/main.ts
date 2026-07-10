@@ -28,6 +28,7 @@ import { CameraRig } from './choreography/cameraRig';
 import { BikePath } from './choreography/bikePath';
 import { initMaster } from './choreography/master';
 import { registerIntroSegment } from './choreography/segments/intro';
+import { registerAboutSegment } from './choreography/segments/about';
 
 // Loader
 import { createLoader } from './ui/loader';
@@ -118,6 +119,14 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
 
   // 10. Register intro segment keys (camera + bike + in-world title)
   registerIntroSegment({
+    rig,
+    bike: bikePath,
+    anchors: city.anchors,
+    updatables
+  });
+
+  // Register about segment keys (camera + bike + 5 holo displays)
+  registerAboutSegment({
     rig,
     bike: bikePath,
     anchors: city.anchors,
