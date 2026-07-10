@@ -24,6 +24,12 @@ const CSS = {
   tronCyan: '#00f0ff',
   void: '#07080f'
 } as const;
+
+/**
+ * Maximum t at which the scroll-hint pulse override applies.
+ * Mirrors SCROLL_HINT_REMOVE_T in reducedMotion.ts — the hint is removed once t exceeds this.
+ */
+const SCROLL_HINT_T_MAX = 0.02;
 import type { DisplayAnchors } from '../../world/cityLayout';
 
 // ---------------------------------------------------------------------------
@@ -126,11 +132,22 @@ export interface IntroSegmentOptions {
   updatables: { update(t: number): void }[];
 }
 
+export interface IntroSegmentHandle {
+  /**
+   * Pulse the intro panel's "SCROLL TO RIDE" opacity.
+   * Call each rAF frame while the hint is active (t=0 idle).
+   * opacity: 0→1 scale applied on top of the base panel opacity.
+   *
+   * No-op in non-browser environments.
+   */
+  pulseScrollHint(opacity: number): void;
+}
+
 /**
  * Registers intro segment keys and builds in-world intro title.
- * Returns an updatable that handles the title fade.
+ * Returns a handle with `pulseScrollHint` for the scroll-hint idle pulse.
  */
-export function registerIntroSegment(opts: IntroSegmentOptions): void {
+export function registerIntroSegment(opts: IntroSegmentOptions): IntroSegmentHandle {
   const { rig, bike, anchors } = opts;
 
   // ---- Camera keys ----
@@ -206,9 +223,18 @@ export function registerIntroSegment(opts: IntroSegmentOptions): void {
 
     const mat = mesh.material as THREE.MeshBasicMaterial;
 
+    // Track scroll-hint override opacity (0 = no override, use normal fade logic)
+    let scrollHintOpacity: number | null = null;
+
     // Register as an updatable that handles the t=0.03→0.05 fade-out
     opts.updatables.push({
       update(t: number): void {
+        // When the scroll hint pulse is active at t=0, honour the hint opacity
+        if (scrollHintOpacity !== null && t <= SCROLL_HINT_T_MAX) {
+          mat.opacity = scrollHintOpacity;
+          mesh.visible = true;
+          return;
+        }
         if (t <= 0.03) {
           mat.opacity = 1;
           mesh.visible = true;
@@ -222,5 +248,16 @@ export function registerIntroSegment(opts: IntroSegmentOptions): void {
         }
       }
     });
+
+    return {
+      pulseScrollHint(opacity: number): void {
+        scrollHintOpacity = Math.max(0, Math.min(1, opacity));
+      }
+    };
   }
+
+  // Non-browser environment: return a no-op handle
+  return {
+    pulseScrollHint(_opacity: number): void { /* noop */ }
+  };
 }

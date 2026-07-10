@@ -28,6 +28,7 @@ import { CameraRig } from './choreography/cameraRig';
 import { BikePath } from './choreography/bikePath';
 import { initMaster } from './choreography/master';
 import { registerIntroSegment } from './choreography/segments/intro';
+import { initReducedMotion } from './choreography/reducedMotion';
 import { registerAboutSegment } from './choreography/segments/about';
 import { registerDriftSegment } from './choreography/segments/drift';
 import { registerProjectsSegment } from './choreography/segments/projects';
@@ -121,8 +122,14 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
 
   loader.setProgress(85);
 
-  // 10. Register intro segment keys (camera + bike + in-world title)
-  registerIntroSegment({
+  // 10. Detect reduced-motion preference early so we can wire segments + master correctly.
+  // We call initReducedMotion ONCE here just to check the flag; the full initialization
+  // (with setProgress) happens after master is ready below.
+  const isReducedMotion = typeof window !== 'undefined' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // 10a. Register intro segment keys (camera + bike + in-world title)
+  const introSegment = registerIntroSegment({
     rig,
     bike: bikePath,
     anchors: city.anchors,
@@ -178,14 +185,17 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
   // Wire ambient updates (wall-clock) via core.onFrame.
   // Fix 3: about segment's billboard flicker/scroll/sway also driven here so
   // they animate every frame, including during the static scroll hold (t=0.12–0.26).
-  core.onFrame((sec: number) => {
-    city.updateAmbient(sec);
-    farField.updateAmbient(sec);
-    aboutSegment.updateAmbient(sec);
-    projectsSegment.updateAmbient(sec);
-    researchSegment.updateAmbient(sec);
-    finaleSegment.updateAmbient(sec);
-  });
+  // In reduced-motion mode, skip ambient sway/flicker/smoke — only static geometry.
+  if (!isReducedMotion) {
+    core.onFrame((sec: number) => {
+      city.updateAmbient(sec);
+      farField.updateAmbient(sec);
+      aboutSegment.updateAmbient(sec);
+      projectsSegment.updateAmbient(sec);
+      researchSegment.updateAmbient(sec);
+      finaleSegment.updateAmbient(sec);
+    });
+  }
 
   if (isShotMode) {
     // In shot mode: hide loader instantly (no animation), start render loop,
@@ -199,7 +209,8 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
       camera: core.camera,
       scene: core.scene,
       updatables,
-      render: () => core.render()
+      render: () => core.render(),
+      isReducedMotion
     });
   } else {
     // 12. Fade loader, start render loop
@@ -208,18 +219,37 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
     // Start the render loop
     core.start();
 
-    // Init master timeline (wires ScrollTrigger)
-    initMaster({
+    // Init master timeline (wires ScrollTrigger in standard mode, pin-only in RM mode).
+    // onProgressNotify lets master call back on every setProgress so we can gate the
+    // scroll-hint removal in standard mode (we wire it after initReducedMotion below).
+    let rmOnProgress: ((t: number) => void) | undefined;
+
+    const masterHandle = initMaster({
       rig,
       bike: bikePath,
       bikeAsset,
       camera: core.camera,
       scene: core.scene,
-      updatables
+      updatables,
+      isReducedMotion,
+      onProgressNotify: isReducedMotion ? undefined : (t: number) => {
+        if (rmOnProgress) rmOnProgress(t);
+      }
     });
-  }
 
-  // master handle is not stored separately since it's inlined above
+    // 13. Wire reduced-motion scroll snapping + scroll hint pulse.
+    // initReducedMotion receives masterHandle.setProgress so that:
+    //  - In RM mode: the scroll listener calls setProgress with snapped vignette values.
+    //  - In standard mode: the 4-second idle timer starts; pulseScrollHint modulates
+    //    the intro panel opacity while the user hasn't scrolled.
+    const rmHandle = initReducedMotion(
+      masterHandle.setProgress,
+      isReducedMotion ? undefined : (opacity: number) => introSegment.pulseScrollHint(opacity)
+    );
+
+    // Wire rmHandle.onProgress into the master's onProgressNotify callback chain.
+    rmOnProgress = rmHandle.onProgress;
+  }
 }
 
 function boot(): void {
