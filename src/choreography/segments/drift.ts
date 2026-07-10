@@ -23,13 +23,13 @@
  *   wobbleDuration = 0.02
  *
  * ## Camera keys
- *   t = 0.28   – approach chase: arriving on the About street
- *   t = 0.29   – swing start: begin pulling wide to +Z side
- *   t = 0.30   – wide OUTSIDE shot: camera at (270, 4, 50), looking across
- *                 intersection toward (230, 1, -15) — mega-screens + crowd + crossing
- *   t = 0.33   – hold wide mid-drift (duplicate key to kill Catmull-Rom tangent)
- *   t = 0.35   – begin settling back to rear chase
- *   t = 0.36   – low rear chase: (240, 1.4, 20), looking toward ramp (240, 1.2, -90), fov 66
+ *   t = 0.28   – anchor key matching about segment's last pose (150,10,9); stabilises Catmull-Rom km1
+ *   t = 0.29   – approach chase: (205,4,8) looking (240,1.5,0), fov 65 — bike nears intersection
+ *   t = 0.315  – WIDE outside shot: camera at (270, 4, 50), looking across
+ *                 intersection toward (230, 1, -15) — mega-screens + crowd + crossing, fov 72
+ *   t = 0.33   – hold wide mid-drift (duplicate key to flatten Catmull-Rom tangent)
+ *   t = 0.35   – begin settling: (248,3,6) looking (240,1.5,-60), fov 68
+ *   t = 0.36   – low rear chase: (243, 1.4, -10), looking toward ramp (241, 1.0, -140), fov 66
  *   t = 0.38   – hold low chase (duplicate to stabilise exit frame)
  */
 

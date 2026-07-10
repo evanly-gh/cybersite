@@ -245,10 +245,13 @@ export class BikePath {
     const wobbleDuration = opts.wobbleDuration ?? 0.02;
     const wobbleAmp = opts.wobbleAmp ?? 0.4;
 
-    // Check overlap with existing drift windows
+    // Check overlap with existing drift windows.
+    // Both the existing window's wobble tail and the NEW window's wobble tail
+    // must be accounted for so that two adjacent windows don't overlap in wobble.
+    const newEnd = t1 + wobbleDuration;
     for (const existing of this.driftWindows) {
       const tEnd = existing.t1 + existing.wobbleDuration;
-      if (t0 < tEnd && t1 > existing.t0) {
+      if (t0 < tEnd && newEnd > existing.t0) {
         throw new Error(
           `BikePath.addDriftWindow: overlapping drift windows ` +
           `[${t0}, ${t1}] and [${existing.t0}, ${existing.t1}]`
@@ -368,7 +371,7 @@ export class BikePath {
     // We extract the right-axis from the base quat and rotate around it.
     // The lean in pose is just overwritten; the visual tilt is expressed in pose.lean.
     const newPose: BikePose = {
-      lean: forcedLean !== 0 ? forcedLean : base.pose.lean,
+      lean: forcedLean,
       pitch: base.pose.pitch,
       crouch: base.pose.crouch,
       wheelSpin: base.pose.wheelSpin

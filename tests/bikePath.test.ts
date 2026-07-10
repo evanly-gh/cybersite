@@ -369,5 +369,43 @@ describe('BikePath', () => {
         bp.addDriftWindow({ t0: 0.36, t1: 0.38, oversteerDeg: 10, leanDeg: 10, slideM: 0.1, wobbleCycles: 1 });
       }).not.toThrow();
     });
+
+    it('wobble lean has no discontinuity (pop) at sine zero-crossings', () => {
+      // Regression test for the lean guard bug: `forcedLean !== 0 ? forcedLean : base.pose.lean`
+      // would snap to base ground-state lean whenever the wobble sine crossed zero.
+      //
+      // With wobbleCycles=2 and wobbleDuration=0.02, the damped sine
+      //   −leanRad * wobbleAmp * exp(−5p) * sin(2π * 2 * p)
+      // crosses zero at p=0.25, i.e. t = t1 + 0.02*0.25 = 0.345 + 0.005 = 0.350
+      //
+      // Before the fix, state(0.350).pose.lean === base.pose.lean (a pop).
+      // After the fix, the lean changes smoothly through 0.350.
+      const bp = makeDriftBike();
+      const WOBBLE_DUR = 0.02;
+      bp.addDriftWindow({
+        t0: 0.30, t1: 0.345,
+        oversteerDeg: 28,
+        leanDeg: 33,
+        slideM: 0.4,
+        wobbleCycles: 2,
+        wobbleDuration: WOBBLE_DUR,
+        wobbleAmp: 0.4
+      });
+
+      // p=0.25 zero-crossing is at t = 0.345 + 0.02 * 0.25 = 0.350
+      // Sample lean at epsilon before and after the zero-crossing
+      const epsilon = 1e-5;
+      const tZero = 0.345 + WOBBLE_DUR * 0.25; // = 0.350
+      const leanBefore = bp.state(tZero - epsilon).pose.lean;
+      const leanAt     = bp.state(tZero).pose.lean;
+      const leanAfter  = bp.state(tZero + epsilon).pose.lean;
+
+      // All three values should be within 1e-3 of each other (continuous, no snap-to-base pop).
+      // Before the fix, leanAt would have been ~base.pose.lean (on the order of 0.04–0.1 rad),
+      // while leanBefore/leanAfter are near 0 (the sine is crossing zero). Difference would be
+      // >>1e-3 (typically 0.04+ rad).
+      expect(Math.abs(leanAt - leanBefore)).toBeLessThan(1e-3);
+      expect(Math.abs(leanAfter - leanAt)).toBeLessThan(1e-3);
+    });
   });
 });
