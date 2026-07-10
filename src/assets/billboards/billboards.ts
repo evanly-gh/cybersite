@@ -306,15 +306,21 @@ function hash01(n: number): number {
   return s - Math.floor(s);
 }
 
-/** Neon-flicker level in [0.12, 1]: mostly a subtle shimmer, occasional hard dropouts. */
+/**
+ * Neon-flicker level in [0.7, 1]: mostly a subtle shimmer, occasional dropouts.
+ * Floor raised from 0.12 → 0.70 as a safety net so ad flicker never goes fully
+ * black at sec=0 (screenshot mode). The primary guard for portfolio content is
+ * the `flickers=false` gate in buildBillboard (see below); this floor only
+ * affects residual ad flicker.
+ */
 function flickerLevel(sec: number, seed: number): number {
   const t = sec * 24;
   const tick = Math.floor(t);
   const gate = hash01(tick * 127.1 + seed);
   if (gate > 0.8) {
-    // dropout burst — depth varies per tick, sometimes near-black
+    // dropout burst — depth varies per tick, floored so the screen stays legible
     const depth = hash01(tick * 311.7 + seed * 1.7);
-    return 0.12 + 0.55 * depth;
+    return 0.70 + 0.25 * depth;  // range [0.70, 0.95] (was [0.12, 0.67])
   }
   return 0.92 + 0.08 * Math.sin(sec * 9 + seed);
 }
@@ -717,7 +723,11 @@ export function buildBillboard(rng: Rng, o: BillboardOptions): Billboard {
   placeGlow(glow, glowFrom, placement);
 
   // --- behaviors decided at build time (all rng draws happen NOW, not in update) ---
-  const flickers = rng.chance(0.08);
+  // Content displays (caller-supplied texture) must never flicker — portfolio content
+  // must be reliably readable in screenshots. Ads (no caller texture) may flicker.
+  // The rng.chance() draw always happens so the RNG stream is identical regardless.
+  const _flickerRoll = rng.chance(0.08);
+  const flickers = o.texture !== undefined ? false : _flickerRoll;
   const flickerSeed = rng.range(0, 100);
   const scrolls = format === 'strip' && rng.chance(0.5);
 

@@ -143,6 +143,24 @@ describe('billboards', () => {
     throw new Error('no scrolling strip found in 50 builds');
   });
 
+  it('content displays (caller-supplied texture) never flicker', () => {
+    const rng = makeRng(9999);
+    const tex = new THREE.Texture();
+    for (let i = 0; i < 200; i++) {
+      const bb = buildBillboard(rng, { format: 'square', mount: 'stand', texture: tex });
+      expect(bb.group.userData.flickers).toBe(false);
+    }
+    // emissiveIntensity must stay constant (no updateAmbient modulation)
+    const bb = buildBillboard(makeRng(7), { format: 'landscape', mount: 'wall', texture: tex });
+    const screen = bb.group.getObjectByName('screen') as THREE.Mesh;
+    const mat = screen.material as THREE.MeshStandardMaterial;
+    const base = mat.emissiveIntensity;
+    for (let s = 0; s < 40; s++) {
+      bb.updateAmbient(s * 0.31);
+      expect(mat.emissiveIntensity).toBeCloseTo(base, 5);
+    }
+  });
+
   it('~8% of builds flicker, and flicker actually modulates emissiveIntensity', () => {
     const rng = makeRng(1234);
     let flickerers = 0;

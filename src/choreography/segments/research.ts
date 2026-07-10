@@ -27,18 +27,18 @@
  *    [2]: (240, 32, -667) rotY=0
  *    [3]: (240, 32, -762) rotY=0
  *
- *  Panel 1 (left/boulevard, z=-477):  anchor[0], dx=-20 → world (220,32,-477)
+ *  Panel 1 (left/boulevard, z=-477):  anchor[0], dx=-8 → world (232,28,-477)
  *    Camera passes: z_bike ≈ -468 → t ≈ 0.655
  *    Fade window: t 0.64 → 0.73 (in view ~0.09 t; ≥0.05 ✓)
  *
- *  Panel 2 (right/buildings, z=-572):  anchor[1], dx=+20 → world (260,32,-572)
+ *  Panel 2 (right/buildings, z=-572):  anchor[1], dx=+8 → world (248,28,-572)
  *    Camera passes: z_bike ≈ -563 → t ≈ 0.736
  *    Fade window: t 0.72 → 0.79 (in view ~0.07 t; ≥0.05 ✓)
  *
- *  Garnish 1 (left, z=-477): anchor[0], dx=-20, dy=+10 → world (220,42,-477)
+ *  Garnish 1 (left, z=-477): anchor[0], dx=-8, dy=+5 → world (232,37,-477)
  *    Same fade window as Panel 1.
  *
- *  Garnish 2 (right, z=-572): anchor[1], dx=+20, dy=+10 → world (260,42,-572)
+ *  Garnish 2 (right, z=-572): anchor[1], dx=+8, dy=+5 → world (248,37,-572)
  *    Same fade window as Panel 2.
  *
  * PANEL ORIENTATION:
@@ -72,6 +72,24 @@ function hex(n: number): string {
 
 function easeInOutQuad(x: number): number {
   return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
+}
+
+/**
+ * Computes camera world position at scroll parameter t using the same lead-follow
+ * formula as the camera keys: 9m along route tangent ahead of the bike + 2.5m up
+ * (plus the climb-phase extra offset). Pure f(t) — no state, scrub-safe.
+ */
+function camPosAtT(t: number, uStart: number, uAt79: number): THREE.Vector3 {
+  const SEG_LEN = 0.79 - 0.62;
+  const frac = THREE.MathUtils.clamp((t - 0.62) / SEG_LEN, 0, 1);
+  const u = THREE.MathUtils.clamp(uStart + frac * (uAt79 - uStart), 0, 1);
+  const frame = roadFrame(u);
+  const bikePos = frame.pos.clone();
+  const tangent = frame.tangent.clone().normalize();
+  const climbExtra = Math.max(0, 1 - (t - 0.62) / 0.08) * 4.0;
+  return bikePos.clone()
+    .addScaledVector(tangent, 9.0)
+    .add(new THREE.Vector3(0, 2.5 + climbExtra, 0));
 }
 
 // ---------------------------------------------------------------------------
@@ -515,6 +533,22 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
 
   // Base Y positions (anchor-local) to restore after bob (match position.set y values)
   const BASE_Y = [-4, -4, 5, 5];
+  // Current Y-billboard yaw for each panelGroup; updated by update(t) and read by
+  // updateAmbient to add the gentle sway on top of the billboarded angle.
+  const currentYaw = new Float32Array(4).fill(Math.PI);
+
+  // Panel world X,Z (fixed — anchors have rotY=0, panelGroup X/Z offsets don't change).
+  // Precomputed so update(t) doesn't traverse the scene graph every frame.
+  // Each entry is [worldX, worldZ] for the corresponding panelGroup.
+  // We use getWorldPosition into a temp vector for robustness (accounts for any
+  // city group translation, even if currently zero).
+  const _tmp = new THREE.Vector3();
+  const panelWorldXZ: Array<[number, number]> = panelGroups.map((grp) => {
+    // getWorldPosition requires the object to have been added to the scene; since
+    // this runs after all .add() calls above, it is safe.
+    grp.getWorldPosition(_tmp);
+    return [_tmp.x, _tmp.z];
+  });
 
   // Start all hidden
   panelGroups.forEach((g) => { g.visible = false; });
@@ -526,9 +560,13 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
     return 1;
   }
 
-  // Scroll-driven updatable: show/hide + fade
+  // Scroll-driven updatable: show/hide + fade + Y-billboard facing
   opts.updatables.push({
     update(t: number): void {
+      // Y-billboard: compute camera world position at this t (pure f(t), scrub-safe).
+      // All four panels share one camera position per frame.
+      const cam = camPosAtT(t, uStart, uAt79);
+
       for (let i = 0; i < 4; i++) {
         const grp  = panelGroups[i];
         const alpha = fadeAlpha(t, FADE_RANGES[i]);
@@ -543,6 +581,17 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
         const ref = screenRefs[i];
         if (ref.glowMat)   ref.glowMat.opacity = 0.12 * alpha;
         if (ref.screenMat) ref.screenMat.emissiveIntensity = ref.baseIntensity * alpha;
+
+        // Y-billboard: rotate the panelGroup so its local +Z (screen front face) points
+        // from the panel toward the camera in world space.
+        // Formula: rotation.y = atan2(ΔX, ΔZ) where Δ = cam - panelWorld.
+        // Since the anchor's world rotY=0, panelGroup.rotation.y IS the world yaw.
+        // This overrides the static Math.PI baseline; ambient sway is applied on top
+        // in updateAmbient (which adds a small sway delta to whatever rotation is set).
+        const [px, pz] = panelWorldXZ[i];
+        const yaw = Math.atan2(cam.x - px, cam.z - pz);
+        grp.rotation.y = yaw;
+        currentYaw[i] = yaw;
       }
     }
   });
@@ -561,9 +610,10 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
       const bob  = BOB_AMP * Math.sin(sec * 0.52 + BOB_PHASES[i]);
       grp.position.y = BASE_Y[i] + bob;
 
-      // Gentle yaw sway around the π base rotation
+      // Gentle yaw sway around the current Y-billboard yaw (set by update(t)).
+      // Small ±0.35° sway adds a living quality without breaking the camera-facing.
       const sway = SWAY_AMP * Math.sin(sec * 0.38 + BOB_PHASES[i] + 0.5);
-      grp.rotation.y = Math.PI + sway;
+      grp.rotation.y = currentYaw[i] + sway;
 
       // Thruster glow pulse (panels only)
       const thrs = allThrusters[i];
