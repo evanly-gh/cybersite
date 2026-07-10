@@ -31,6 +31,7 @@ import { registerIntroSegment } from './choreography/segments/intro';
 import { registerAboutSegment } from './choreography/segments/about';
 import { registerDriftSegment } from './choreography/segments/drift';
 import { registerProjectsSegment } from './choreography/segments/projects';
+import { registerResearchSegment } from './choreography/segments/research';
 
 // Loader
 import { createLoader } from './ui/loader';
@@ -148,6 +149,14 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
     anchors: city.anchors,
     updatables
   });
+
+  // Register research segment (skyway lead-camera, t 0.62–0.79)
+  const researchSegment = registerResearchSegment({
+    rig,
+    bike: bikePath,
+    anchors: city.anchors,
+    updatables
+  });
   loader.setProgress(90);
 
   loader.setProgress(100);
@@ -164,6 +173,7 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
     farField.updateAmbient(sec);
     aboutSegment.updateAmbient(sec);
     projectsSegment.updateAmbient(sec);
+    researchSegment.updateAmbient(sec);
   });
 
   if (isShotMode) {
