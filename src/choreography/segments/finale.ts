@@ -10,10 +10,15 @@
  *    center-bottom against the moon-glitter streak (t 0.84–0.96), then camera
  *    holds while biker shrinks toward the moon (t 0.96–1.0).
  *  - Sandevistan: setMode('finale') at t≥0.80 (full rainbow echo), 'ride' below.
- *  - Bloom strength ramps 0.9→1.5; exposure 1.1→1.25.
- *  - Closing type (in-world CanvasTexture strip holos) fades in t 0.94–0.98:
- *      "EVAN LI — PORTFOLIO 2026" and "KEEP SCROLLING ▼"
- *    Positioned flanking the bridge exit in world space (near bridgeEnd z=-1400).
+ *  - Bloom strength ramps BLOOM_BASE=0.9 → BLOOM_PEAK=1.1 (easeOutCubic); resets
+ *    to BLOOM_BASE below t=0.79. Sweep showed 1.25+ blows out; 1.1 is tasteful ceiling
+ *    given the moon+bridge-rail emissive baseline (easeOutCubic hits 87% peak by t=0.90).
+ *  - Exposure ramps EXPOSURE_BASE=1.1 → EXPOSURE_PEAK=1.14 (easeOutCubic); resets
+ *    to EXPOSURE_BASE below t=0.79.
+ *  - Closing type (in-world CanvasTexture strip holos) fades in t 0.94–0.97:
+ *      "EVAN LI — PORTFOLIO 2026" (left strip) and "KEEP SCROLLING ▼" (right strip)
+ *    Two strips FLANKING the bridge exit: one left of center, one right of center,
+ *    framing the biker's path toward the moon. (bridge center x=240, deck ~12m wide)
  *
  * CAMERA GEOMETRY:
  *  Moon at (240, 260, -2600), MOON_RADIUS=320. Bridge runs along x=240, y≈12-14,
@@ -31,15 +36,17 @@
  *
  * CLOSING TYPE:
  *  No DisplayAnchors for the finale. Position directly in world space.
- *  Left strip: (224, 16, -1350) facing +Z (bridge approach direction, looking ahead)
- *  Right strip: (256, 16, -1350) same facing
- *  Actually: place them above bridge deck, facing the approach (-Z direction of travel,
- *  so camera behind the bike sees them above the bridge ahead).
- *  Strips face world +Z (toward the camera that's behind the bike):
- *    camera is at z_cam = z_bike + 18..20 (more positive Z = behind bike which moves -Z)
- *    strips at z=-1350 face +Z so camera at z=-1350+20=-1330 sees them (panel faces +Z = toward +Z direction)
- *  Wait: camera is BEHIND the bike (more positive Z). Strip at z=-1350 should face +Z.
- *    Camera is at z=-1350+20=-1330. Vector from strip to camera: +Z. Strip facing +Z ✓
+ *  Two thin strips FLANKING the bridge exit, facing world +Z (toward the chase camera).
+ *  Left strip: (226, 14, -1500) — "EVAN LI — PORTFOLIO 2026", 30m wide
+ *  Right strip: (254, 14, -1500) — "KEEP SCROLLING ▼", 15m wide
+ *  Bridge center x=240, deck ~12m wide; strips are ~14m off-center (just outside rails).
+ *
+ *  Z-position rationale: at t=0.94 bike is at z≈-1386 (easeOutCubic≈0.977 of route),
+ *  camera is 20m behind at z≈-1366. Strips at z=-1500 are 134m ahead of camera,
+ *  well inside FOV=48° looking toward moon at z=-2600. bridgeEnd is z=-1400;
+ *  z=-1500 is below ocean surface (off-bridge), fine for floating holographic strips.
+ *
+ *  Fade in t=0.93 (T_TYPE_IN) → full at t=0.95 (T_TYPE_FULL) → hold until t=0.99 → fade out.
  *
  * FOG NOTE:
  *  Moon uses MeshBasicMaterial + fog:false — already punches through fog.
@@ -57,7 +64,6 @@ import type { Core } from '../../core/core';
 import { ROUTE_U, roadFrame } from '../../world/route';
 import { makeCanvasTexture } from '../../utils/canvasText';
 import { COLORS } from '../../theme';
-import { makeRng } from '../../utils/rng';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -66,15 +72,23 @@ import { makeRng } from '../../utils/rng';
 const T_START = 0.79;
 const T_END   = 1.0;
 const T_FINALE_MODE = 0.80;  // sandevistan switches to finale
-const T_TYPE_IN  = 0.92;     // closing type fade in begins
-const T_TYPE_FULL = 0.95;    // closing type fully visible
+const T_TYPE_IN  = 0.93;     // closing type fade in begins — slightly before 0.94 so strips are fully legible by 0.95
+const T_TYPE_FULL = 0.95;    // closing type fully visible at t=0.95 (brief legibility gate)
 const T_TYPE_STAY = 0.99;    // keep visible until here
 
-// Base bloom/exposure (same as core.ts defaults)
+// Base bloom/exposure (same as core.ts defaults, reset below T_START for scrub-safety).
+// Bloom sweep results (easeOutCubic ramp: at t=0.90 already ~87% of peak):
+//   1.35: blown white mush at t=0.90 (moon+rails overwhelm)
+//   1.30: blown, upper frame solid white at t=0.90
+//   1.25: blown, biker invisible at t=0.95
+//   1.15: better but still bright at upper frame — mid-frame OK
+//   1.10: controlled — moon glow crisp, rails bright but not clipping, biker silhouette clear.
+//         This is the tasteful ceiling for this scene given moon+rail emissive baseline.
+// EXPOSURE: 1.20 pushed detail out at t=0.97, 1.14 lifts shadows without blowing moon.
 const BLOOM_BASE  = 0.9;
 const BLOOM_PEAK  = 1.1;
 const EXPOSURE_BASE = 1.1;
-const EXPOSURE_PEAK = 1.15;
+const EXPOSURE_PEAK = 1.14;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -371,29 +385,36 @@ export function registerFinaleSegment(opts: FinaleSegmentOptions): FinaleSegment
     return { updateAmbient: () => {} };
   }
 
-  const _rng = makeRng(1337 + 30);
-
   // Build strip textures
   const titleTex  = drawTitleStrip();
   const scrollTex = drawScrollStrip();
 
-  // Strip dimensions in world metres
-  // Title strip: 1280×160 canvas → 24m wide × 3m tall in world
-  const TITLE_W  = 24;
-  const TITLE_H  = TITLE_W * (160 / 1280);  // ≈3m
+  // Strip dimensions in world metres.
+  // Brief: "two THIN strip holos FLANKING the bridge exit."
+  // Each strip is kept narrow so they flank without blocking the moon view.
+  //
+  // Flanking geometry:
+  //   Bridge center x=240, deck ~12m wide → rails near x=234 and x=246.
+  //   LEFT strip (title "EVAN LI — PORTFOLIO 2026") at x=226 — just outside left rail.
+  //   RIGHT strip (scroll "KEEP SCROLLING ▼") at x=254 — just outside right rail.
+  //   Both at y=22 (above bridge deck at y≈12, above camera at y≈19.5 for visibility),
+  //   z=-1500 (past bridgeEnd, floating in ocean space ahead of the bridge exit).
+  //   Both face world +Z (toward the chase camera which is at more positive z).
+  //   Camera at t=0.97: bike≈z=-1398, cam 20m behind at z≈-1378, strips at z=-1500
+  //   → strips are 122m ahead of camera in the path toward the moon. FOV=48° at 122m:
+  //   half-width ≈ 122*tan(24°) ≈ 54m, so ±14m lateral is well within frame.
+  //   No Y-rotation needed: strips face +Z and camera looks along -Z, roughly face-on.
 
-  // Scroll strip: 640×100 canvas → 8m wide × 1.25m tall
-  const SCROLL_W = 8;
-  const SCROLL_H = SCROLL_W * (100 / 640);  // ≈1.25m
+  // Title strip: 30m wide × aspect-correct height (1280:160 = 8:1 → 30m × 3.75m)
+  // At z=-1500 (122m from camera at t=0.97), 30m occupies ~14° of FOV — clearly visible.
+  const TITLE_W  = 30;
+  const TITLE_H  = TITLE_W * (160 / 1280);  // ≈3.75m
 
-  // --- Build title strip geometry (PlaneGeometry, additive screen) ---
-  // Positioned above the bridge deck flanking the closing stretch.
-  // World position: x=240 (bridge center), y=20 (above deck at y≈12), z=-1340 (near end of bridge).
-  // Strip faces world +Z so the camera behind the bike (at z > -1340) can see it.
-  // One large centered strip spanning the full bridge width.
-  // Geometry and materials for in-world closing type.
-  // Normal blending (not additive) so text is readable against both dark and bright backgrounds.
-  // fog: false to avoid distance fade.
+  // Scroll strip: 15m wide × aspect-correct height (640:100 = 6.4:1 → 15m × 2.34m)
+  const SCROLL_W = 15;
+  const SCROLL_H = SCROLL_W * (100 / 640);  // ≈2.34m
+
+  // Left strip (title) — LEFT of bridge center
   const titleGeo = new THREE.PlaneGeometry(TITLE_W, TITLE_H);
   const titleMat = new THREE.MeshBasicMaterial({
     map: titleTex,
@@ -404,16 +425,14 @@ export function registerFinaleSegment(opts: FinaleSegmentOptions): FinaleSegment
     side: THREE.DoubleSide
   });
 
-  // PLACEMENT: at t=0.95 bike is at z≈-1300, camera is 20m behind at z≈-1280.
-  // Type at z=-1380 is ahead of camera, in field of view looking toward -Z.
-  // Camera looks at bikePos (z≈-1300), type is at z=-1380 further ahead = in upper view frustum.
-  // y=16: just above bridge deck (deck at y≈12), visible from camera at y≈19.5 looking slightly down.
   const titleMesh = new THREE.Mesh(titleGeo, titleMat);
-  titleMesh.position.set(240, 16, -1380);
+  // x=226: left of center; y=14: at bridge-deck height (darker part of frame, visible vs teal ocean);
+  // z=-1500: past bridgeEnd, floating in ocean space ahead of biker's final position.
+  titleMesh.position.set(226, 14, -1500);
   titleMesh.name = 'finaleTitle';
   titleMesh.frustumCulled = false;
 
-  // Scroll strip below the title
+  // Right strip (scroll) — RIGHT of bridge center
   const scrollGeo = new THREE.PlaneGeometry(SCROLL_W, SCROLL_H);
   const scrollMat = new THREE.MeshBasicMaterial({
     map: scrollTex,
@@ -424,13 +443,15 @@ export function registerFinaleSegment(opts: FinaleSegmentOptions): FinaleSegment
     side: THREE.DoubleSide
   });
   const scrollMesh = new THREE.Mesh(scrollGeo, scrollMat);
-  scrollMesh.position.set(240, 14, -1380);
+  // x=254: right of center; y=14: same height; z=-1500: aligned with title strip
+  scrollMesh.position.set(254, 14, -1500);
   scrollMesh.name = 'finaleScroll';
   scrollMesh.frustumCulled = false;
 
-  // Glow plane: additive backlight halo (always additive, low opacity)
-  const glowGeo = new THREE.PlaneGeometry(TITLE_W + 6, TITLE_H + 3);
-  const glowMat = new THREE.MeshBasicMaterial({
+  // Glow planes: one behind each strip for additive halo effect
+  const glowGeoL = new THREE.PlaneGeometry(TITLE_W + 4, TITLE_H + 2);
+  const glowGeoR = new THREE.PlaneGeometry(SCROLL_W + 4, SCROLL_H + 2);
+  const glowMatL = new THREE.MeshBasicMaterial({
     color: new THREE.Color(COLORS.moonlight),
     transparent: true,
     opacity: 0,
@@ -439,37 +460,18 @@ export function registerFinaleSegment(opts: FinaleSegmentOptions): FinaleSegment
     fog: false,
     side: THREE.DoubleSide
   });
-  const glowMesh = new THREE.Mesh(glowGeo, glowMat);
-  glowMesh.position.set(240, 15.8, -1381);  // slightly behind title (more negative z)
-  glowMesh.name = 'finaleGlow';
-  glowMesh.frustumCulled = false;
+  const glowMatR = glowMatL.clone();
+  const glowMeshL = new THREE.Mesh(glowGeoL, glowMatL);
+  glowMeshL.position.set(226, 14, -1501);  // slightly behind left strip
+  glowMeshL.name = 'finaleGlowL';
+  glowMeshL.frustumCulled = false;
+  const glowMeshR = new THREE.Mesh(glowGeoR, glowMatR);
+  glowMeshR.position.set(254, 14, -1501);  // slightly behind right strip
+  glowMeshR.name = 'finaleGlowR';
+  glowMeshR.frustumCulled = false;
 
-  // These objects need to be added to the scene.
-  // We defer to the updatable's first call — but they need a scene reference.
-  // Pattern: flag-based lazy add the first time update(t) sees t near 0.94.
-  // We receive scene via a closure passed from main.ts.
-  // To avoid needing scene reference, we instead require caller to pass the scene.
-  // For simplicity: we return an init function that the caller invokes with the scene.
-  // But looking at how other segments do it (they add to anchors which are already in scene),
-  // we need to add directly to the scene. The handle returned from registerFinaleSegment
-  // will include an init(scene) method.
-  // Update: simpler approach — just use the group pattern, caller adds to scene.
-  // Return the group from the handle, and caller adds it.
-  // Actually, looking at research.ts more carefully — it adds to anchors which are THREE.Group
-  // objects already in the scene. For finale, we have no anchor, so we need the scene.
-  // The cleanest approach: store all three meshes in a group, return that group from handle,
-  // and let main.ts add it to the scene. But that changes the interface.
-  // Alternative (used here): pass scene to updatable directly through closure — but we don't
-  // have the scene at registration time.
-  //
-  // Decision: add `scene` to FinaleSegmentOptions. Update main.ts to pass core.scene.
-
-  // NOTE: This will be wired in main.ts — we mark these as needing scene.add().
-  // We use a lazy-init approach: on first update call, if not added yet, add to scene.
-  // We store a reference via the opts.updatables push below.
+  // Lazy-add to scene on first visible frame.
   let typeAddedToScene = false;
-
-  // We need the scene — store reference to core (which has core.scene)
   const scene = core.scene;
 
   function ensureTypeMeshesInScene(): void {
@@ -477,7 +479,8 @@ export function registerFinaleSegment(opts: FinaleSegmentOptions): FinaleSegment
     typeAddedToScene = true;
     scene.add(titleMesh);
     scene.add(scrollMesh);
-    scene.add(glowMesh);
+    scene.add(glowMeshL);
+    scene.add(glowMeshR);
   }
 
   // Closing type alpha
@@ -496,17 +499,19 @@ export function registerFinaleSegment(opts: FinaleSegmentOptions): FinaleSegment
       if (alpha > 0) {
         ensureTypeMeshesInScene();
         titleMat.opacity  = alpha;
-        scrollMat.opacity = alpha * 0.85;
-        glowMat.opacity   = alpha * 0.04;
+        scrollMat.opacity = alpha;
+        glowMatL.opacity  = alpha * 0.04;
+        glowMatR.opacity  = alpha * 0.04;
       } else {
         titleMat.opacity  = 0;
         scrollMat.opacity = 0;
-        glowMat.opacity   = 0;
+        glowMatL.opacity  = 0;
+        glowMatR.opacity  = 0;
       }
     }
   });
 
-  // Ambient: slow pulsing glow and subtle title billboard-face toward camera
+  // Ambient: slow pulsing glow on both flanking glow planes
   function updateAmbient(sec: number): void {
     if (!typeAddedToScene) return;
     const alpha = titleMat.opacity;
@@ -514,7 +519,8 @@ export function registerFinaleSegment(opts: FinaleSegmentOptions): FinaleSegment
 
     // Gentle pulse on glow
     const pulse = 0.03 + 0.015 * Math.sin(sec * 0.8);
-    glowMat.opacity = alpha * pulse;
+    glowMatL.opacity = alpha * pulse;
+    glowMatR.opacity = alpha * pulse;
   }
 
   return { updateAmbient };
