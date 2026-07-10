@@ -752,7 +752,7 @@ const CITY_SEED_SALT = {
   metro: 15000
 };
 
-export function buildCity(seed: number): City {
+export function buildCity(seed: number, density = 1): City {
   const layout = computeCityLayout(seed);
   const group = new THREE.Group();
   group.name = 'city';
@@ -870,11 +870,19 @@ export function buildCity(seed: number): City {
   // Grouped by (format, mount) ONLY — global across every zone, same reasoning as the
   // filler buildings above: a handful of ad templates, replicated everywhere, for a
   // draw-call cost that never grows with the repeat count.
+  // On mobile (density < 1), halve the repeat billboard count to reduce GPU load.
   const repeatsByGroup = new Map<string, BillboardSlot[]>();
   for (const bb of layout.billboards.filter((b) => !b.unique)) {
     const key = `${bb.format}:${bb.mount}`;
     if (!repeatsByGroup.has(key)) repeatsByGroup.set(key, []);
     repeatsByGroup.get(key)!.push(bb);
+  }
+  // Apply density: keep only floor(count * density) repeats per group.
+  if (density < 1) {
+    for (const [key, slots] of repeatsByGroup) {
+      const keep = Math.floor(slots.length * density);
+      repeatsByGroup.set(key, slots.slice(0, keep));
+    }
   }
   let bbTemplateSalt = 0;
   for (const [key, slots] of repeatsByGroup) {

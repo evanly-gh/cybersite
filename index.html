@@ -3,10 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Evan Li</title>
+  <title>Evan Li — CS + Econ @ UW</title>
+  <meta name="description" content="Evan Li — CS + Economics student at UW (GPA 3.9). ML systems, on-device inference, model compression. Projects: TTT-E2E, RememberMe. Research: Mobile Intelligence Lab." />
 </head>
 <body>
-  <div id="hero">
+  <!-- Skip link: first focusable element in the DOM, anchors past the 1450vh hero pin.
+       Visible on :focus only (otherwise sr-only). Lets keyboard users and screen-reader
+       users jump directly to the readable content without scrolling through the cinematic. -->
+  <a href="#post-hero" class="skip-link">Skip intro</a>
+
+  <div id="hero" role="img" aria-label="Animated portfolio intro — content repeated below">
     <canvas id="stage"></canvas>
   </div>
   <main id="post-hero"></main>

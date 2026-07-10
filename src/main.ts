@@ -3,81 +3,118 @@ import '@fontsource/rajdhani';
 import '@fontsource/share-tech-mono';
 import './styles.css';
 import * as THREE from 'three';
-import { runViewer } from './viewer/viewer';
-import { loadEntries } from './viewer/entries';
 import { initCore } from './core/core';
 import { initCursorTrail } from './fx/cursorTrail';
-import { makeRng } from './utils/rng';
 
-// World builders
-import { buildCity } from './world/cityLayout';
-import { buildStreets } from './world/streets';
-import { buildFarField } from './world/farField';
-import { buildTraffic } from './choreography/traffic';
-
-// Bike
-import { buildBike } from './assets/vehicles/bike';
-
-// FX
-import { buildSandevistan } from './fx/sandevistan';
-import { buildLightPools } from './fx/lightPools';
-import { buildDriftFx } from './fx/driftFx';
-
-// Choreography
-import { CameraRig } from './choreography/cameraRig';
-import { BikePath } from './choreography/bikePath';
-import { initMaster } from './choreography/master';
-import { registerIntroSegment } from './choreography/segments/intro';
-import { initReducedMotion } from './choreography/reducedMotion';
-import { registerAboutSegment } from './choreography/segments/about';
-import { registerDriftSegment } from './choreography/segments/drift';
-import { registerProjectsSegment } from './choreography/segments/projects';
-import { registerResearchSegment } from './choreography/segments/research';
-import { registerFinaleSegment } from './choreography/segments/finale';
-
-// Loader
+// Loader (small, loaded eagerly — appears within ~1s)
 import { createLoader } from './ui/loader';
 
-// Post-hero DOM sections
+// Post-hero DOM sections (lightweight, no Three.js dependency)
 import { renderPostHero } from './ui/postHero';
 
 /**
+ * Detect mobile: pointer:coarse (touch) OR narrow viewport.
+ * Used at boot to downgrade quality tier and density.
+ */
+function detectMobile(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 820;
+}
+
+/**
  * Boot the real scroll-driven hero scene.
- * Replaces the temporary sanity scene (Task 4) with the full world.
+ * World build is deferred via dynamic import so the loader paints within ~1s.
  */
 async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
-  // 1. Show loader
+  // 1. Detect mobile early
+  const isMobile = detectMobile();
+
+  // 2. Show loader (small, eager import — paints fast)
   const loader = createLoader();
   loader.setProgress(0);
 
-  // 2. Init core renderer
+  // 3. Init core renderer
   const core = initCore(canvas);
+
+  // 4. On mobile: start at quality tier 1 (lower DPR, smaller bloom)
+  if (isMobile) {
+    core.setQuality(1);
+  }
   loader.setProgress(5);
 
-  // 3. Build world (city seed 1337, matching city.ts viewer entry)
+  // 5. Dynamic import the heavy world-building code AFTER loader has painted.
+  //    This is the main lever for first-paint latency and bundle chunk splitting.
+  //    Vite will code-split everything reachable only from these dynamic imports.
+  const [
+    { makeRng },
+    { buildCity },
+    { buildStreets },
+    { buildFarField },
+    { buildTraffic },
+    { buildBike },
+    { buildSandevistan },
+    { buildLightPools },
+    { buildDriftFx },
+    { CameraRig },
+    { BikePath },
+    { initMaster },
+    { registerIntroSegment },
+    { initReducedMotion },
+    { registerAboutSegment },
+    { registerDriftSegment },
+    { registerProjectsSegment },
+    { registerResearchSegment },
+    { registerFinaleSegment }
+  ] = await Promise.all([
+    import('./utils/rng'),
+    import('./world/cityLayout'),
+    import('./world/streets'),
+    import('./world/farField'),
+    import('./choreography/traffic'),
+    import('./assets/vehicles/bike'),
+    import('./fx/sandevistan'),
+    import('./fx/lightPools'),
+    import('./fx/driftFx'),
+    import('./choreography/cameraRig'),
+    import('./choreography/bikePath'),
+    import('./choreography/master'),
+    import('./choreography/segments/intro'),
+    import('./choreography/reducedMotion'),
+    import('./choreography/segments/about'),
+    import('./choreography/segments/drift'),
+    import('./choreography/segments/projects'),
+    import('./choreography/segments/research'),
+    import('./choreography/segments/finale')
+  ]);
+
+  // 6. Build world (city seed 1337, matching city.ts viewer entry)
+  // On mobile: density=0.5 halves Ring 2 far-field instance count + billboard repeats.
+  const density = isMobile ? 0.5 : 1;
   const rng = makeRng(1337);
-  const city = buildCity(1337);
+  const city = buildCity(1337, density);
   const streets = buildStreets(makeRng(1337 + 1));
-  const farField = buildFarField(makeRng(1337 + 2));
+  const farField = buildFarField(makeRng(1337 + 2), density);
   loader.setProgress(30);
 
-  // 4. Build traffic
+  // 7. Build traffic
   const traffic = buildTraffic(makeRng(1337 + 3));
   loader.setProgress(45);
 
-  // 5. Build bike
+  // 8. Build bike
   const bikeAsset = buildBike(makeRng(1337 + 4));
   bikeAsset.group.name = 'bike';
   bikeAsset.group.userData.isBike = true;
   loader.setProgress(55);
 
-  // 6. Build FX
+  // 9. Build FX
+  // On mobile: cap smoke particles at 20 per window (default 40)
+  const maxSmoke = isMobile ? 20 : 40;
   const sandevistan = buildSandevistan(bikeAsset.ghostGeometry);
   const lightPools = buildLightPools([bikeAsset.group, traffic.group]);
-  const driftFx = buildDriftFx();
+  const driftFx = buildDriftFx(maxSmoke);
   loader.setProgress(65);
 
-  // 7. Assemble scene (same order as city.ts viewer entry: far → streets → city)
+  // 10. Assemble scene (same order as city.ts viewer entry: far → streets → city)
   core.scene.add(farField.group);
   core.scene.add(streets);
   core.scene.add(city.group);
@@ -88,14 +125,14 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
   core.scene.add(driftFx.group);
   loader.setProgress(75);
 
-  // 8. Add lighting (ambient + hemisphere for night city)
+  // 11. Add lighting (ambient + hemisphere for night city)
   const hemi = new THREE.HemisphereLight(0x1a2040, 0x07080f, 0.6);
   core.scene.add(hemi);
   const key = new THREE.DirectionalLight(0xffffff, 0.4);
   key.position.set(50, 100, -50);
   core.scene.add(key);
 
-  // 9. Build choreography components
+  // 12. Build choreography components
   const rig = new CameraRig();
   const bikePath = new BikePath();
 
@@ -125,13 +162,13 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
 
   loader.setProgress(85);
 
-  // 10. Detect reduced-motion preference early so we can wire segments + master correctly.
+  // 13. Detect reduced-motion preference early so we can wire segments + master correctly.
   // We call initReducedMotion ONCE here just to check the flag; the full initialization
   // (with setProgress) happens after master is ready below.
   const isReducedMotion = typeof window !== 'undefined' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // 10a. Register intro segment keys (camera + bike + in-world title)
+  // 14a. Register intro segment keys (camera + bike + in-world title)
   const introSegment = registerIntroSegment({
     rig,
     bike: bikePath,
@@ -140,11 +177,13 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
   });
 
   // Register about segment keys (camera + bike + 5 holo displays)
+  // Pass mobile flag so fixed-side poses get fov+8 and 15% pull-back for portrait framing.
   const aboutSegment = registerAboutSegment({
     rig,
     bike: bikePath,
     anchors: city.anchors,
-    updatables
+    updatables,
+    mobile: isMobile
   });
 
   // Register drift segment keys (Shibuya crossing, t 0.28–0.38)
@@ -154,11 +193,13 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
   });
 
   // Register projects segment (ramp backflips, t 0.38–0.62)
+  // Pass mobile flag so fixed-side poses get fov+8 and 15% pull-back for portrait framing.
   const projectsSegment = registerProjectsSegment({
     rig,
     bike: bikePath,
     anchors: city.anchors,
-    updatables
+    updatables,
+    mobile: isMobile
   });
 
   // Register research segment (skyway lead-camera, t 0.62–0.79)
@@ -181,7 +222,7 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
 
   loader.setProgress(100);
 
-  // 11. Detect ?shot= mode early — in shot mode we skip loader.hide() and
+  // 15. Detect ?shot= mode early — in shot mode we skip loader.hide() and
   // render synchronously, then the master signals __READY after 2 frames.
   const isShotMode = new URLSearchParams(window.location.search).has('shot');
 
@@ -216,7 +257,7 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
       isReducedMotion
     });
   } else {
-    // 12. Fade loader, start render loop
+    // 16. Fade loader, start render loop
     await loader.hide();
 
     // Start the render loop
@@ -240,7 +281,7 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
       }
     });
 
-    // 13. Wire reduced-motion scroll snapping + scroll hint pulse.
+    // 17. Wire reduced-motion scroll snapping + scroll hint pulse.
     // initReducedMotion receives masterHandle.setProgress so that:
     //  - In RM mode: the scroll listener calls setProgress with snapped vignette values.
     //  - In standard mode: the 4-second idle timer starts; pulseScrollHint modulates
@@ -253,14 +294,35 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
     // Wire rmHandle.onProgress into the master's onProgressNotify callback chain.
     rmOnProgress = rmHandle.onProgress;
   }
+
+  // 18. ?stats=1 — print draw-call + triangle info to console after first render.
+  if (new URLSearchParams(window.location.search).has('stats')) {
+    // After 2 rAFs (past the loader hide), renderer.info will reflect the live scene.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const info = core.renderer.info.render;
+        console.log(`[stats] draw calls: ${info.calls}, triangles: ${info.triangles}, lines: ${info.lines}, points: ${info.points}`);
+      });
+    });
+  }
+
 }
 
 function boot(): void {
   if (new URLSearchParams(location.search).has('viewer')) {
     // Viewer-asset registrations live in src/viewer/entries/*.ts (one file per asset
     // family, auto-discovered) so parallel asset tasks never edit a shared file.
-    loadEntries();
-    runViewer();
+    // Dynamic import keeps them out of the main bundle.
+    Promise.all([
+      import('./viewer/entries'),
+      import('./viewer/viewer')
+    ]).then(([{ loadEntries }, { runViewer }]) => {
+      loadEntries();
+      runViewer();
+    }).catch((err) => {
+      console.error('viewer boot failed:', err);
+      window.__READY = true;
+    });
     return;
   }
 

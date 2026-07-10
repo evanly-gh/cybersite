@@ -713,6 +713,53 @@ main {
   text-align: center;
 }
 
+/* ------------------------------------------------------------------ */
+/* Accessibility utilities                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * .sr-only — visually hidden but accessible to screen readers and SEO.
+ * Standard clip pattern (WCAG 2.2 / axe-core compatible).
+ */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/**
+ * .skip-link — "Skip intro" anchor as first focusable element in the DOM.
+ * Visible on :focus (keyboard users can see it), hidden otherwise.
+ * Anchors to #post-hero, fast-scrolling past the 1450vh hero pin.
+ */
+.skip-link {
+  position: fixed;
+  top: -100%;
+  left: 0;
+  z-index: 9999;
+  padding: 0.75rem 1.5rem;
+  background: var(--tron-cyan);
+  color: var(--void);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.9rem;
+  font-weight: bold;
+  letter-spacing: 0.12em;
+  text-decoration: none;
+  transition: top 0.2s ease;
+}
+
+.skip-link:focus {
+  top: 0;
+  outline: 2px solid var(--void);
+  outline-offset: 2px;
+}
+
 /* ---- Reduced motion overrides ---- */
 @media (prefers-reduced-motion: reduce) {
   .ph-heading {

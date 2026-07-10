@@ -343,60 +343,179 @@ function buildOffsetTube(
 // Track: box-girder + ribs + running lights + T-pylons
 // ---------------------------------------------------------------------------------
 
+/**
+ * Zone boundary u-parameters for splitting the metro loop into cullable segments.
+ * Each zone covers a spatial region of the city; when the camera doesn't look at
+ * that region, the zone's meshes frustum-cull out entirely.
+ *
+ * Approximate zone boundaries derived by arc-length-sampling METRO_PATH and
+ * mapping the 12 waypoints to their closest u values:
+ *   about    : u 0.00 → 0.28  (About street, w→e)
+ *   shibuya  : u 0.28 → 0.46  (Shibuya crossing + boulevard north)
+ *   boulevard: u 0.46 → 0.60  (Projects boulevard, z -150 → -470)
+ *   far      : u 0.60 → 1.00  (distant return leg — mostly off-screen, stays merged)
+ *
+ * The "far" zone is NOT split further — it's behind everything visible from any
+ * street camera, so its draw calls only appear at the overhead/debug viewpoint.
+ */
+const METRO_ZONE_BOUNDARIES = [0, 0.28, 0.46, 0.60, 1.0] as const;
+type MetroZone = 'about' | 'shibuya' | 'boulevard' | 'far';
+const METRO_ZONE_NAMES: MetroZone[] = ['about', 'shibuya', 'boulevard', 'far'];
+
+/**
+ * Sample n points of METRO_PATH between u0 and u1 (arc-length params),
+ * returning a new (open) CatmullRomCurve3 suitable for building a sub-arc
+ * TubeGeometry with a tight spatial bounding sphere.
+ */
+function subCurve(u0: number, u1: number, n = 80): THREE.CatmullRomCurve3 {
+  const pts: THREE.Vector3[] = [];
+  for (let i = 0; i <= n; i++) {
+    const u = u0 + (i / n) * (u1 - u0);
+    pts.push(METRO_PATH.getPointAt(u));
+  }
+  return new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+}
+
+/**
+ * Build a per-zone offset tube (running lights / cable tray) — same logic as
+ * buildOffsetTube but sampling only the [u0,u1] arc of METRO_PATH.
+ */
+function buildOffsetTubeZone(
+  u0: number,
+  u1: number,
+  side: number,
+  down: number,
+  outAmount: number,
+  radius: number,
+  mat: THREE.Material,
+  name: string
+): THREE.Mesh {
+  const N = Math.max(20, Math.round(60 * (u1 - u0)));
+  const pts: THREE.Vector3[] = [];
+  const frame: PathFrame = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
+  for (let i = 0; i <= N; i++) {
+    const u = u0 + (i / N) * (u1 - u0);
+    pathFrameAt(u, frame);
+    const right = new THREE.Vector3(0, 0, 1).applyQuaternion(frame.quat);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(frame.quat);
+    pts.push(
+      frame.pos.clone()
+        .addScaledVector(right, side * outAmount)
+        .addScaledVector(up, -down)
+    );
+  }
+  const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+  const geom = new THREE.TubeGeometry(curve, N, radius, 4, false);
+  const mesh = new THREE.Mesh(geom, mat);
+  mesh.name = name;
+  return mesh;
+}
+
+/**
+ * Build an offset path (for the deck plate) over [u0, u1].
+ */
+function offsetPathYZone(dy: number, u0: number, u1: number, N = 60): THREE.CatmullRomCurve3 {
+  const pts: THREE.Vector3[] = [];
+  const p = new THREE.Vector3();
+  for (let i = 0; i <= N; i++) {
+    const u = u0 + (i / N) * (u1 - u0);
+    METRO_PATH.getPointAt(u, p);
+    pts.push(new THREE.Vector3(p.x, p.y + dy, p.z));
+  }
+  return new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+}
+
+/**
+ * Zone-split metro track builder (Task 33 draw-call fix).
+ *
+ * The original buildTrack built one TubeGeometry per track feature (girder,
+ * deck, running lights, cable tray) over the FULL ~2000m loop. Each of those
+ * tubes computes a bounding sphere that spans the whole loop, so THREE's default
+ * frustum culling never drops them — they draw at every viewpoint regardless of
+ * camera direction (~+10 extra draws at every street viewpoint).
+ *
+ * Fix: split each tube and each InstancedMesh (ribs, pylons) into per-zone
+ * sub-meshes. Each zone's mesh has a tight bounding sphere covering only its
+ * spatial extent (~500m radius vs. ~1200m for the full loop), so zones out of
+ * the camera's view frustum-cull properly.
+ *
+ * SHARED across zones: all THREE.Material instances (darkStructureMat,
+ * runMat, etc.) — we create them ONCE and pass to every zone's mesh. This is
+ * the critical invariant from the d125b32 lesson: never regenerate per-zone
+ * textures or ad-texture geometry; only the mesh/instance grouping is zoned.
+ */
 function buildTrack(rng: Rng): THREE.Group {
   const group = new THREE.Group();
   group.name = 'metroTrack';
 
+  // Shared materials — created ONCE, reused across all zones.
   const structMat = darkStructureMat();
+  const runMat = glowMat(COLORS.holoTeal, 3.4);
 
-  // Backbone: TubeGeometry with radial=4 -> a boxy girder core.
-  const core = new THREE.Mesh(
-    new THREE.TubeGeometry(METRO_PATH, 700, GIRDER_CORE_R, 4, true),
-    structMat
-  );
-  core.rotation.set(0, 0, 0);
-  core.name = 'girderCore';
-  group.add(core);
-
-  // Cross-section frames (box-girder ribs) via InstancedMesh along the path.
   const pathLen = METRO_PATH.getLength();
   const ribSpacing = 3.2;
-  const nRibs = Math.floor(pathLen / ribSpacing);
   const ribGeom = new THREE.BoxGeometry(0.28, RIB_HALF_H * 2 + 0.35, RIB_HALF_W * 2 + 0.3);
-  const ribs = new THREE.InstancedMesh(ribGeom, structMat, nRibs);
-  ribs.name = 'girderRibs';
   const frame: PathFrame = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
   const mtx = new THREE.Matrix4();
   const scl = new THREE.Vector3(1, 1, 1);
-  for (let i = 0; i < nRibs; i++) {
-    pathFrameAt(i / nRibs, frame);
-    mtx.compose(frame.pos, frame.quat, scl);
-    ribs.setMatrixAt(i, mtx);
+
+  // Build per-zone sub-meshes. Each zone group has a tight bounding sphere.
+  for (let zi = 0; zi < METRO_ZONE_NAMES.length; zi++) {
+    const zoneName = METRO_ZONE_NAMES[zi];
+    const u0 = METRO_ZONE_BOUNDARIES[zi];
+    const u1 = METRO_ZONE_BOUNDARIES[zi + 1];
+    const zoneGroup = new THREE.Group();
+    zoneGroup.name = `metroZone:${zoneName}`;
+
+    // Segment resolution proportional to zone arc fraction.
+    const tubeSegs = Math.max(30, Math.round(700 * (u1 - u0)));
+
+    // --- Girder core: TubeGeometry over zone arc ---
+    const coreCurve = subCurve(u0, u1, tubeSegs);
+    const coreGeom = new THREE.TubeGeometry(coreCurve, tubeSegs, GIRDER_CORE_R, 4, false);
+    const coreMesh = new THREE.Mesh(coreGeom, structMat);
+    coreMesh.name = `girderCore:${zoneName}`;
+    zoneGroup.add(coreMesh);
+
+    // --- Deck plate: tube offset in Y ---
+    const deckSegs = Math.max(20, Math.round(500 * (u1 - u0)));
+    const deckCurve = offsetPathYZone(GIRDER_TOP + 0.12, u0, u1, deckSegs);
+    const deckGeom = new THREE.TubeGeometry(deckCurve, deckSegs, 0.12, 4, false);
+    const deckMesh = new THREE.Mesh(deckGeom, structMat);
+    deckMesh.name = `girderDeck:${zoneName}`;
+    zoneGroup.add(deckMesh);
+
+    // --- Running lights (2 emissive tubes) ---
+    zoneGroup.add(buildOffsetTubeZone(u0, u1, +1, RUN_LIGHT_DOWN, RUN_LIGHT_OUT, 0.09, runMat, `runLightR:${zoneName}`));
+    zoneGroup.add(buildOffsetTubeZone(u0, u1, -1, RUN_LIGHT_DOWN, RUN_LIGHT_OUT, 0.09, runMat, `runLightL:${zoneName}`));
+
+    // --- Cable tray ---
+    zoneGroup.add(buildOffsetTubeZone(u0, u1, +1, RIB_HALF_H + 0.35, RIB_HALF_W * 0.55, 0.16, structMat, `cableTray:${zoneName}`));
+
+    // --- Ribs: InstancedMesh covering only this zone's arc ---
+    const nRibsTotal = Math.floor(pathLen / ribSpacing);
+    const ribU0 = Math.floor(u0 * nRibsTotal);
+    const ribU1 = Math.ceil(u1 * nRibsTotal);
+    const nZoneRibs = ribU1 - ribU0;
+    if (nZoneRibs > 0) {
+      const ribs = new THREE.InstancedMesh(ribGeom, structMat, nZoneRibs);
+      ribs.name = `girderRibs:${zoneName}`;
+      for (let i = 0; i < nZoneRibs; i++) {
+        const globalI = ribU0 + i;
+        pathFrameAt(globalI / nRibsTotal, frame);
+        mtx.compose(frame.pos, frame.quat, scl);
+        ribs.setMatrixAt(i, mtx);
+      }
+      ribs.instanceMatrix.needsUpdate = true;
+      ribs.computeBoundingSphere();
+      zoneGroup.add(ribs);
+    }
+
+    group.add(zoneGroup);
   }
-  ribs.instanceMatrix.needsUpdate = true;
-  group.add(ribs);
 
-  // Continuous flat deck box on top of the ribs (reads as the box-girder top plate).
-  const deck = new THREE.Mesh(
-    new THREE.TubeGeometry(offsetPathY(GIRDER_TOP + 0.12), 500, 0.12, 4, true),
-    structMat
-  );
-  deck.name = 'girderDeck';
-  group.add(deck);
-
-  // Teal edge running-lights: two thin emissive tubes hugging the girder's lower edges.
-  const runMat = glowMat(COLORS.holoTeal, 3.4);
-  group.add(buildOffsetTube(+1, RUN_LIGHT_DOWN, RUN_LIGHT_OUT, 0.09, runMat, 'runLightR'));
-  group.add(buildOffsetTube(-1, RUN_LIGHT_DOWN, RUN_LIGHT_OUT, 0.09, runMat, 'runLightL'));
-
-  // Cable tray (iteration detail): a dark conduit slung under the girder underside.
-  group.add(
-    buildOffsetTube(+1, RIB_HALF_H + 0.35, RIB_HALF_W * 0.55, 0.16, structMat, 'cableTray')
-  );
-
-  // T-pylons every PYLON_SPACING metres down to the ground (skips the distant far leg
-  // where the loop is behind everything and off any street — see buildPylons).
-  buildPylons(group, rng, pathLen);
+  // T-pylons: zone-split by u-range (skips distant far leg gz < -400 as before).
+  buildPylonsZoned(group, rng, pathLen, structMat);
 
   return group;
 }
@@ -428,6 +547,8 @@ interface PylonPlan {
  * handful of InstancedMesh/Points draw calls total (see farField.ts's InstancedMesh
  * pattern) rather than one Group+mesh per pylon, so pylon count stays cheap against
  * the city-wide draw-call budget.
+ *
+ * @deprecated Use buildPylonsZoned instead (Task 33 draw-call fix).
  */
 function buildPylons(group: THREE.Group, rng: Rng, pathLen: number): void {
   const structMat = darkStructureMat();
@@ -571,6 +692,185 @@ function buildPylons(group: THREE.Group, rng: Rng, pathLen: number): void {
         if (dot(d, d) > 0.25) discard;
         // Deterministic blink in uTime (== global t), matching the original per-strobe
         // emissive pulse: mostly-on with occasional bright peaks.
+        float on = step(0.6, sin(uTime * 24.0 + vPhase));
+        float intensity = 0.4 + mix(0.05, 1.0, on) * 4.0;
+        gl_FragColor = vec4(uColor * intensity, 1.0);
+      }
+    `,
+    fog: false,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  });
+  const strobePoints = new THREE.Points(strobeGeom, strobeMat);
+  strobePoints.name = 'pylonStrobes';
+  strobePoints.frustumCulled = false;
+  group.add(strobePoints);
+
+  group.userData.strobeMaterial = strobeMat;
+}
+
+/**
+ * Zone-split pylon builder (Task 33 draw-call fix).
+ *
+ * Splits pylons into per-zone InstancedMesh groups so each zone's bounding
+ * sphere covers only its spatial extent. When the camera looks at one street
+ * zone, the other zones' pylons frustum-cull out.
+ *
+ * Materials and geometry are SHARED across zones (created once, reused).
+ * The strobeMaterial is returned via group.userData for metro.ts's update().
+ */
+function buildPylonsZoned(group: THREE.Group, rng: Rng, pathLen: number, sharedStructMat: THREE.Material): void {
+  // Create pylon-specific materials once, shared across all zones.
+  const hazardMat = new THREE.MeshStandardMaterial({
+    map: makeHazardTexture(),
+    roughness: 0.8,
+    metalness: 0.1
+  });
+  const graffitiMat = new THREE.MeshStandardMaterial({
+    map: makeGraffitiTexture(rng),
+    transparent: true,
+    roughness: 0.9,
+    metalness: 0
+  });
+
+  const nPylonsRaw = Math.floor(pathLen / PYLON_SPACING);
+  const pylonFrame: PathFrame = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
+  const _pos = new THREE.Vector3();
+  const _scale = new THREE.Vector3(1, 1, 1);
+
+  // Collect all pylon plans (same logic as buildPylons, same rng stream shape).
+  const allPlans: Array<PylonPlan & { u: number }> = [];
+  for (let i = 0; i < nPylonsRaw; i++) {
+    const u = i / nPylonsRaw;
+    pathFrameAt(u, pylonFrame);
+    const gz = pylonFrame.pos.z;
+    // Skip distant far return leg (same exclusion as buildPylons — no rng consumed on skip).
+    if (gz < -400) continue;
+    const gx = pylonFrame.pos.x;
+    const gy = pylonFrame.pos.y;
+    const h = gy + GIRDER_BOTTOM;
+    const pylonMat4 = new THREE.Matrix4().compose(
+      _pos.set(gx, 0, gz),
+      pylonFrame.quat.clone(),
+      _scale
+    );
+    const strobeWorldPos = new THREE.Vector3(0, h - 0.3, 0).applyMatrix4(pylonMat4);
+    allPlans.push({
+      pylonMat: pylonMat4,
+      h,
+      hasGraffiti: rng.chance(0.5),
+      graffitiOffsetY: rng.range(2.5, 4.5),
+      strobeWorldPos,
+      phase: i * 0.37,
+      u
+    });
+  }
+
+  if (allPlans.length === 0) return;
+
+  const localMat = new THREE.Matrix4();
+  const worldMat = new THREE.Matrix4();
+  const zeroQuat = new THREE.Quaternion();
+  const decalQuat = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, Math.PI / 2);
+  const decalGeom = new THREE.PlaneGeometry(0.9, 1.8);
+
+  // Build per-zone pylon InstancedMesh groups.
+  for (let zi = 0; zi < METRO_ZONE_NAMES.length; zi++) {
+    const zoneName = METRO_ZONE_NAMES[zi];
+    const u0 = METRO_ZONE_BOUNDARIES[zi];
+    const u1 = METRO_ZONE_BOUNDARIES[zi + 1];
+    const zonePlans = allPlans.filter((p) => p.u >= u0 && p.u < u1);
+    if (zonePlans.length === 0) continue;
+
+    const nZ = zonePlans.length;
+
+    // --- Structural boxes (column + T-cap + 2 braces): one InstancedMesh/zone ---
+    const PARTS_PER_PYLON = 4;
+    const structMesh = new THREE.InstancedMesh(unitBox, sharedStructMat, nZ * PARTS_PER_PYLON);
+    structMesh.name = `pylonStruct:${zoneName}`;
+    let idx = 0;
+    for (const p of zonePlans) {
+      const { h } = p;
+      localMat.compose(_pos.set(0, h / 2, 0), zeroQuat, _scale.set(0.9, h, 0.9));
+      structMesh.setMatrixAt(idx++, worldMat.multiplyMatrices(p.pylonMat, localMat));
+      localMat.compose(_pos.set(0, h - 0.3, 0), zeroQuat, _scale.set(0.6, 0.6, RIB_HALF_W * 2 + 1.6));
+      structMesh.setMatrixAt(idx++, worldMat.multiplyMatrices(p.pylonMat, localMat));
+      localMat.compose(_pos.set(0, h - 1.4, RIB_HALF_W + 0.5), zeroQuat, _scale.set(0.35, 2.2, 0.35));
+      structMesh.setMatrixAt(idx++, worldMat.multiplyMatrices(p.pylonMat, localMat));
+      localMat.compose(_pos.set(0, h - 1.4, -(RIB_HALF_W + 0.5)), zeroQuat, _scale.set(0.35, 2.2, 0.35));
+      structMesh.setMatrixAt(idx++, worldMat.multiplyMatrices(p.pylonMat, localMat));
+    }
+    structMesh.instanceMatrix.needsUpdate = true;
+    structMesh.computeBoundingSphere();
+    group.add(structMesh);
+
+    // --- Hazard base collars ---
+    const hazardMesh = new THREE.InstancedMesh(unitBox, hazardMat, nZ);
+    hazardMesh.name = `pylonHazardBase:${zoneName}`;
+    zonePlans.forEach((p, i) => {
+      localMat.compose(_pos.set(0, 1.2, 0), zeroQuat, _scale.set(1.15, 2.4, 1.15));
+      hazardMesh.setMatrixAt(i, worldMat.multiplyMatrices(p.pylonMat, localMat));
+    });
+    hazardMesh.instanceMatrix.needsUpdate = true;
+    hazardMesh.computeBoundingSphere();
+    group.add(hazardMesh);
+
+    // --- Graffiti decals ---
+    const graffitiZonePlans = zonePlans.filter((p) => p.hasGraffiti);
+    if (graffitiZonePlans.length > 0) {
+      const graffitiMesh = new THREE.InstancedMesh(decalGeom, graffitiMat, graffitiZonePlans.length);
+      graffitiMesh.name = `pylonGraffiti:${zoneName}`;
+      graffitiZonePlans.forEach((p, i) => {
+        localMat.compose(_pos.set(0.46, p.graffitiOffsetY, 0), decalQuat, _scale.set(1, 1, 1));
+        graffitiMesh.setMatrixAt(i, worldMat.multiplyMatrices(p.pylonMat, localMat));
+      });
+      graffitiMesh.instanceMatrix.needsUpdate = true;
+      graffitiMesh.computeBoundingSphere();
+      group.add(graffitiMesh);
+    }
+  }
+
+  // --- Strobes: a single Points draw call covering all near-zone pylons.
+  // Keep frustumCulled=false (the bounding sphere would be per-zone, but strobe
+  // sprites need to be visible over a wider angle as small emissive dots — the
+  // draw cost is 1 call at any viewpoint regardless of zone, same as original).
+  const nearPlans = allPlans; // all plans (gz < -400 already excluded above)
+  const nNear = nearPlans.length;
+  const strobePositions = new Float32Array(nNear * 3);
+  const strobePhases = new Float32Array(nNear);
+  nearPlans.forEach((p, i) => {
+    strobePositions[i * 3 + 0] = p.strobeWorldPos.x;
+    strobePositions[i * 3 + 1] = p.strobeWorldPos.y;
+    strobePositions[i * 3 + 2] = p.strobeWorldPos.z;
+    strobePhases[i] = p.phase;
+  });
+  const strobeGeom = new THREE.BufferGeometry();
+  strobeGeom.setAttribute('position', new THREE.BufferAttribute(strobePositions, 3));
+  strobeGeom.setAttribute('aPhase', new THREE.BufferAttribute(strobePhases, 1));
+  strobeGeom.computeBoundingSphere();
+
+  const strobeMat = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uColor: { value: new THREE.Color(COLORS.sodiumAmber) }
+    },
+    vertexShader: /* glsl */ `
+      attribute float aPhase;
+      varying float vPhase;
+      void main() {
+        vPhase = aPhase;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = 900.0 / -mv.z;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform vec3 uColor;
+      varying float vPhase;
+      void main() {
+        vec2 d = gl_PointCoord - 0.5;
+        if (dot(d, d) > 0.25) discard;
         float on = step(0.6, sin(uTime * 24.0 + vPhase));
         float intensity = 0.4 + mix(0.05, 1.0, on) * 4.0;
         gl_FragColor = vec4(uColor * intensity, 1.0);

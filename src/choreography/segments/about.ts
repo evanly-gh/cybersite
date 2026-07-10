@@ -218,6 +218,8 @@ export interface AboutSegmentOptions {
   bike: BikePath;
   anchors: DisplayAnchors;
   updatables: { update(t: number): void }[];
+  /** When true, raise fixed-side pose fov by +8 and pull back 15% for portrait framing. */
+  mobile?: boolean;
 }
 
 export interface AboutSegmentHandle {
@@ -226,7 +228,7 @@ export interface AboutSegmentHandle {
 }
 
 export function registerAboutSegment(opts: AboutSegmentOptions): AboutSegmentHandle {
-  const { rig, bike, anchors } = opts;
+  const { rig, bike, anchors, mobile = false } = opts;
 
   // ---- Camera keys ----
   // Hold pose: camera at (-30, 12, 26) looking at (-30, 8, -11.5), fov 50.
@@ -238,8 +240,17 @@ export function registerAboutSegment(opts: AboutSegmentOptions): AboutSegmentHan
   //
   // Two-step transition at t=0.10→0.11→0.12 to avoid Catmull-Rom spline
   // clipping through buildings.
-  const camPos = new THREE.Vector3(-30, 12, 26);
+  //
+  // On mobile (portrait framing): fov +8 (widens view for narrow viewport),
+  // pull back 15% from the look target so the cluster fits in portrait frame.
+  const holdFov = mobile ? 50 + 8 : 50;
   const camLook = new THREE.Vector3(-30, 8, -11.5);
+  // Pull-back: compute camPos as 1.15× the desktop distance from look target.
+  // Desktop camPos = (-30, 12, 26); distance z-component = 26 - (-11.5) = 37.5m.
+  // Mobile z: -11.5 + 37.5 * 1.15 = -11.5 + 43.125 = 31.625 ≈ 31.6
+  const camPos = mobile
+    ? new THREE.Vector3(-30, 12, -11.5 + 37.5 * 1.15)
+    : new THREE.Vector3(-30, 12, 26);
 
   rig.addKeys([
     {
@@ -263,22 +274,22 @@ export function registerAboutSegment(opts: AboutSegmentOptions): AboutSegmentHan
     },
     {
       t: 0.12,
-      pose: { pos: camPos.clone(), look: camLook.clone(), fov: 50, roll: 0 },
+      pose: { pos: camPos.clone(), look: camLook.clone(), fov: holdFov, roll: 0 },
       ease: easeInOutQuad
     },
     // Duplicate hold keys to zero out Catmull-Rom tangents in the hold region.
     // With km1=k0=k1=k2 all equal, catmullRom returns exactly v1 for all t.
     {
       t: 0.14,
-      pose: { pos: camPos.clone(), look: camLook.clone(), fov: 50, roll: 0 }
+      pose: { pos: camPos.clone(), look: camLook.clone(), fov: holdFov, roll: 0 }
     },
     {
       t: 0.24,
-      pose: { pos: camPos.clone(), look: camLook.clone(), fov: 50, roll: 0 }
+      pose: { pos: camPos.clone(), look: camLook.clone(), fov: holdFov, roll: 0 }
     },
     {
       t: 0.26,
-      pose: { pos: camPos.clone(), look: camLook.clone(), fov: 50, roll: 0 }
+      pose: { pos: camPos.clone(), look: camLook.clone(), fov: holdFov, roll: 0 }
     },
     {
       t: 0.28,

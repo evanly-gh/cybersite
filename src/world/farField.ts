@@ -644,7 +644,7 @@ function buildGlitter(): { mesh: THREE.Mesh; material: THREE.ShaderMaterial } {
 const BEACON_PERIOD_SEC = 2.4;
 const BEACON_DUTY = 0.18;
 
-export function buildFarField(rng: Rng): { group: THREE.Group; updateAmbient: (sec: number) => void } {
+export function buildFarField(rng: Rng, density = 1): { group: THREE.Group; updateAmbient: (sec: number) => void } {
   const group = new THREE.Group();
   group.name = 'farField';
 
@@ -660,7 +660,9 @@ export function buildFarField(rng: Rng): { group: THREE.Group; updateAmbient: (s
 
   // Round-2 iteration: dimmer, sparser second ring at ~1650-2000m so the primary
   // skyline's 1600m cutoff doesn't read as a hard, suspiciously circular city edge.
-  const farBuildings = generateBuildings(rng, FAR_SKYLINE_COUNT, FAR_SKYLINE_INNER_R, FAR_SKYLINE_OUTER_R);
+  // On mobile (density < 1), halve the far Ring 2 instance count to save GPU.
+  const farCount = Math.floor(FAR_SKYLINE_COUNT * density);
+  const farBuildings = generateBuildings(rng, farCount, FAR_SKYLINE_INNER_R, FAR_SKYLINE_OUTER_R);
   const { mesh: farSkylineMesh } = buildSkylineMesh(farBuildings, FAR_SKYLINE_DIM);
   group.add(farSkylineMesh);
 

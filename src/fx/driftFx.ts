@@ -206,8 +206,11 @@ export interface DriftFx {
  * window and both ramp landings.
  *
  * All state driven by `t` is a pure function of t — no accumulation.
+ *
+ * @param maxSmokePerWindow - cap on particles per window (default: SMOKE_COUNT=40).
+ *   Pass a lower value (e.g. 20) on mobile to reduce sprite draw calls.
  */
-export function buildDriftFx(): DriftFx {
+export function buildDriftFx(maxSmokePerWindow = SMOKE_COUNT): DriftFx {
   const group = new THREE.Group();
   group.name = 'driftFx';
 
@@ -280,9 +283,9 @@ export function buildDriftFx(): DriftFx {
   const driftParticles: SmokeParticle[] = [];
   const landingParticles: SmokeParticle[][] = [[], []];
 
-  /** Build a set of SMOKE_COUNT particles for a given route u-range. */
+  /** Build a set of smoke particles for a given route u-range. */
   function buildParticles(uA: number, uB: number, target: SmokeParticle[], cyanTint: boolean): void {
-    for (let i = 0; i < SMOKE_COUNT; i++) {
+    for (let i = 0; i < maxSmokePerWindow; i++) {
       const frac = rng.range(0, 1);
       const u = uA + frac * (uB - uA);
       const frame = roadFrame(u);

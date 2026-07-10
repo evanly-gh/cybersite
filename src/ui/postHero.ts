@@ -426,12 +426,81 @@ function buildContact(): HTMLElement {
 }
 
 /**
+ * Build visually-hidden (.sr-only) DOM copies of all hero billboard content
+ * (About paragraph, Projects, Research) so screen readers and search engines
+ * get the same text the in-world billboards show.
+ *
+ * The block is placed FIRST inside #post-hero (before the visible sections),
+ * so AT users encounter it immediately after the skip-link jump.
+ *
+ * Content is sourced directly from RESUME — no hardcoded copy.
+ */
+function buildHeroMirror(): HTMLElement {
+  const div = document.createElement('div');
+  div.id = 'hero-mirror';
+  div.className = 'sr-only';
+  div.setAttribute('aria-label', 'Hero content mirror — same information displayed in 3D scene above');
+
+  // --- About ---
+  const aboutHeading = document.createElement('h2');
+  aboutHeading.textContent = `About ${RESUME.name}`;
+  div.appendChild(aboutHeading);
+
+  const aboutPara = document.createElement('p');
+  aboutPara.textContent = RESUME.about.paragraph;
+  div.appendChild(aboutPara);
+
+  // --- Projects (main) ---
+  const projHeading = document.createElement('h2');
+  projHeading.textContent = 'Projects';
+  div.appendChild(projHeading);
+
+  [...RESUME.projectsMain, ...RESUME.projectsSmall].forEach((proj) => {
+    const h3 = document.createElement('h3');
+    h3.textContent = proj.title;
+    div.appendChild(h3);
+
+    const stack = document.createElement('p');
+    stack.textContent = proj.stack;
+    div.appendChild(stack);
+
+    const blurb = document.createElement('p');
+    blurb.textContent = proj.blurb;
+    div.appendChild(blurb);
+  });
+
+  // --- Research ---
+  const resHeading = document.createElement('h2');
+  resHeading.textContent = 'Research';
+  div.appendChild(resHeading);
+
+  RESUME.research.forEach((item) => {
+    const h3 = document.createElement('h3');
+    h3.textContent = item.title;
+    div.appendChild(h3);
+
+    const stack = document.createElement('p');
+    stack.textContent = item.stack;
+    div.appendChild(stack);
+
+    const blurb = document.createElement('p');
+    blurb.textContent = item.blurb;
+    div.appendChild(blurb);
+  });
+
+  return div;
+}
+
+/**
  * Render all post-hero sections into #post-hero.
  * Called once at boot, after the hero scene is set up.
  */
 export function renderPostHero(): void {
   const container = document.getElementById('post-hero');
   if (!container) return;
+
+  // Hero content mirror (sr-only, placed FIRST so AT users get it right after skip-link)
+  container.appendChild(buildHeroMirror());
 
   container.appendChild(buildEducation());
   container.appendChild(buildSkills());

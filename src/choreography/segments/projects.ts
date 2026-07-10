@@ -396,6 +396,8 @@ export interface ProjectsSegmentOptions {
   bike: BikePath;
   anchors: DisplayAnchors;
   updatables: { update(t: number): void }[];
+  /** When true, raise fixed-side pose fov by +8 and pull back 15% for portrait framing. */
+  mobile?: boolean;
 }
 
 export interface ProjectsSegmentHandle {
@@ -403,7 +405,7 @@ export interface ProjectsSegmentHandle {
 }
 
 export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsSegmentHandle {
-  const { rig, bike, anchors } = opts;
+  const { rig, bike, anchors, mobile = false } = opts;
 
   // ---- Step 1: Air windows (backflips) ----
   bike.addAir([
@@ -484,16 +486,23 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
 
   // Side pose 1: perpendicular fixed pose looking at the +X wall
   // Camera at (190, 10, -125) fov 46, looking at the arc + displays on the wall
-  const side1Pos = new THREE.Vector3(190, 10, -125);
-  // Look toward wall midpoint at about x=240, y=12, z=-130 (arc apex region)
-  // Look toward the wall face mid-section (between the two displays, y=12 = midpoint of arc+displays)
-  // Wall at x=251.5, z≈-125, y=12 (midpoint between upper y=21 and lower y=2.5)
+  // On mobile (portrait framing): fov +8 = 54, pull back 15% from wall.
+  // Desktop: camera at x=190 looking at wall x=251 → distance = 61m.
+  // Mobile: 61m * 1.15 = 70.15m → camera at x = 251 - 70.15 = 180.85 ≈ 181.
   const side1Look = new THREE.Vector3(251, 12, -125);
+  const side1Fov = mobile ? 46 + 8 : 46;
+  const side1Pos = mobile
+    ? new THREE.Vector3(251 - 61 * 1.15, 10, -125)
+    : new THREE.Vector3(190, 10, -125);
 
   // Side pose 2: second fixed side pose at ramp2
-  const side2Pos = new THREE.Vector3(190, 9, -295);
-  // Look toward wall face at ramp2 (wall x=251.5, z≈-295, y=7 = midpoint)
+  // Desktop: camera at x=190 looking at wall x=251 → distance = 61m (same wall).
+  // Mobile: same 15% pull-back.
   const side2Look = new THREE.Vector3(251, 7, -295);
+  const side2Fov = mobile ? 46 + 8 : 46;
+  const side2Pos = mobile
+    ? new THREE.Vector3(251 - 61 * 1.15, 9, -295)
+    : new THREE.Vector3(190, 9, -295);
 
   // Low chase pose at ramp1Base approach
   const chaseRamp1Pos = new THREE.Vector3(243, 1.4, -10);
@@ -534,7 +543,7 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
       pose: {
         pos: side1Pos.clone(),
         look: side1Look.clone(),
-        fov: 46,
+        fov: side1Fov,
         roll: 0
       },
       ease: easeInOutQuad
@@ -545,7 +554,7 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
       pose: {
         pos: side1Pos.clone(),
         look: side1Look.clone(),
-        fov: 46,
+        fov: side1Fov,
         roll: 0
       }
     },
@@ -554,7 +563,7 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
       pose: {
         pos: side1Pos.clone(),
         look: side1Look.clone(),
-        fov: 46,
+        fov: side1Fov,
         roll: 0
       }
     },
@@ -563,7 +572,7 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
       pose: {
         pos: side1Pos.clone(),
         look: side1Look.clone(),
-        fov: 46,
+        fov: side1Fov,
         roll: 0
       }
     },
@@ -587,7 +596,7 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
       pose: {
         pos: side2Pos.clone(),
         look: side2Look.clone(),
-        fov: 46,
+        fov: side2Fov,
         roll: 0
       },
       ease: easeInOutQuad
@@ -598,7 +607,7 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
       pose: {
         pos: side2Pos.clone(),
         look: side2Look.clone(),
-        fov: 46,
+        fov: side2Fov,
         roll: 0
       }
     },
@@ -607,7 +616,7 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
       pose: {
         pos: side2Pos.clone(),
         look: side2Look.clone(),
-        fov: 46,
+        fov: side2Fov,
         roll: 0
       }
     },

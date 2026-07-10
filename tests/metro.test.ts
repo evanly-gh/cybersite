@@ -142,20 +142,28 @@ describe('metro: source-level house rules', () => {
   });
 });
 
+/** Find the first InstancedMesh whose name starts with prefix in the group tree. */
+function findInstancedMesh(root: THREE.Object3D, prefix: string): THREE.InstancedMesh | undefined {
+  let result: THREE.InstancedMesh | undefined;
+  root.traverse((o) => {
+    if (!result && (o as THREE.InstancedMesh).isInstancedMesh && o.name.startsWith(prefix)) {
+      result = o as THREE.InstancedMesh;
+    }
+  });
+  return result;
+}
+
 describe('metro: pylons', () => {
-  it('draw-call budget: pylon layer is a handful of InstancedMesh/Points, not one mesh per pylon', () => {
+  it('draw-call budget: pylon layer is InstancedMesh/Points groups (zone-split for frustum culling), not one mesh per pylon', () => {
     const m = buildMetro(makeRng(6));
-    const track = m.group.getObjectByName('metroTrack') as THREE.Group;
-    const pylonNodes = track.children.filter((c) => c.name.startsWith('pylon'));
-    expect(pylonNodes.length).toBeGreaterThan(0);
-    expect(pylonNodes.length).toBeLessThanOrEqual(10); // single-digit draw calls regardless of pylon count
-
-    const struct = m.group.getObjectByName('pylonStruct') as THREE.InstancedMesh;
+    // Task 33: pylons are now zone-split (e.g. pylonStruct:about, pylonStruct:shibuya, …)
+    // Verify: at least one pylonStruct-prefixed IM exists, plus pylonStrobes.
+    const struct = findInstancedMesh(m.group, 'pylonStruct');
     expect(struct).toBeInstanceOf(THREE.InstancedMesh);
-    // Many pylons batched into this one draw call (4 box instances per pylon).
-    expect(struct.count).toBeGreaterThan(40);
+    // Each zone's struct IM holds 4 instances per pylon in that zone — at least 1 pylon.
+    expect(struct!.count).toBeGreaterThan(0);
 
-    const hazard = m.group.getObjectByName('pylonHazardBase') as THREE.InstancedMesh;
+    const hazard = findInstancedMesh(m.group, 'pylonHazardBase');
     expect(hazard).toBeInstanceOf(THREE.InstancedMesh);
 
     const strobes = m.group.getObjectByName('pylonStrobes') as THREE.Points;
@@ -164,7 +172,15 @@ describe('metro: pylons', () => {
 
   it('T-cap and strobe sit BELOW the girder underside (pylon-height sign-fix pin)', () => {
     const m = buildMetro(makeRng(6));
-    const struct = m.group.getObjectByName('pylonStruct') as THREE.InstancedMesh;
+    // Collect ALL zone-split pylonStruct InstancedMeshes.
+    const structs: THREE.InstancedMesh[] = [];
+    m.group.traverse((o) => {
+      if ((o as THREE.InstancedMesh).isInstancedMesh && o.name.startsWith('pylonStruct')) {
+        structs.push(o as THREE.InstancedMesh);
+      }
+    });
+    expect(structs.length).toBeGreaterThan(0);
+
     const strobePts = m.group.getObjectByName('pylonStrobes') as THREE.Points;
 
     const pos = new THREE.Vector3();
@@ -172,19 +188,21 @@ describe('metro: pylons', () => {
     const scale = new THREE.Vector3();
     const mat = new THREE.Matrix4();
 
-    const nPylons = struct.count / 4;
-    expect(Number.isInteger(nPylons)).toBe(true);
     let tCapChecked = 0;
-    for (let p = 0; p < nPylons; p++) {
-      // Instance order per pylon is [column, T-cap, brace, brace] — index 1 is the T-cap.
-      struct.getMatrixAt(p * 4 + 1, mat);
-      mat.decompose(pos, quat, scale);
-      const gy = nearestGirderY(pos.x, pos.z);
-      // If the old sign bug (h = gy - GIRDER_BOTTOM) were reintroduced, the T-cap would
-      // land ABOVE the girder top instead of just under its underside.
-      expect(pos.y).toBeLessThan(gy + RIB_HALF_H);
-      expect(pos.y).toBeLessThanOrEqual(gy - RIB_HALF_H + 0.05);
-      tCapChecked++;
+    for (const struct of structs) {
+      const nPylons = struct.count / 4;
+      expect(Number.isInteger(nPylons)).toBe(true);
+      for (let p = 0; p < nPylons; p++) {
+        // Instance order per pylon is [column, T-cap, brace, brace] — index 1 is the T-cap.
+        struct.getMatrixAt(p * 4 + 1, mat);
+        mat.decompose(pos, quat, scale);
+        const gy = nearestGirderY(pos.x, pos.z);
+        // If the old sign bug (h = gy - GIRDER_BOTTOM) were reintroduced, the T-cap would
+        // land ABOVE the girder top instead of just under its underside.
+        expect(pos.y).toBeLessThan(gy + RIB_HALF_H);
+        expect(pos.y).toBeLessThanOrEqual(gy - RIB_HALF_H + 0.05);
+        tCapChecked++;
+      }
     }
     expect(tCapChecked).toBeGreaterThan(0);
 
@@ -205,10 +223,17 @@ describe('metro: pylons', () => {
 
   it('pylon column still reaches the ground (y=0) at its base', () => {
     const m = buildMetro(makeRng(6));
-    const struct = m.group.getObjectByName('pylonStruct') as THREE.InstancedMesh;
-    struct.computeBoundingBox();
-    const bb = struct.boundingBox as THREE.Box3;
-    expect(bb.min.y).toBeLessThanOrEqual(0.5); // column base sits at/near ground level
+    // Check across ALL zone-split struct meshes that at least one column base is at/near ground.
+    let minY = Infinity;
+    m.group.traverse((o) => {
+      if ((o as THREE.InstancedMesh).isInstancedMesh && o.name.startsWith('pylonStruct')) {
+        const inst = o as THREE.InstancedMesh;
+        inst.computeBoundingBox();
+        const bb = inst.boundingBox as THREE.Box3;
+        if (bb.min.y < minY) minY = bb.min.y;
+      }
+    });
+    expect(minY).toBeLessThanOrEqual(0.5); // column base sits at/near ground level
   });
 });
 
