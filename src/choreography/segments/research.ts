@@ -489,12 +489,17 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
   //   Full: 0.740–0.780, fade out: 0.780–0.790, giving 0.040 full + fade tail.
   //   Combined on-screen: 0.724–0.790 = 0.066 t ≥ 0.05 ✓
 
+  // I2 fix: original ranges faded panels out before they were firmly in the camera frustum.
+  // Panel 1 at z=-477: enters FOV around t=0.68 (camera 39m away, 11.6° off-axis).
+  // At t=0.72 the panel is well in frame (97m away, 4.7° off-axis). Extend to t=0.78.
+  // Panel 2 at z=-572: enters FOV around t=0.74-0.75 (camera further away). Show through t=0.79.
+  // Both panels now have ≥3 consecutive shot windows where they are fully readable.
   type FadeRange = { show: number; fadeIn: number; fadeOut: number; hide: number };
   const FADE_RANGES: FadeRange[] = [
-    { show: 0.645, fadeIn: 0.660, fadeOut: 0.720, hide: 0.740 }, // panel 1
-    { show: 0.724, fadeIn: 0.740, fadeOut: 0.780, hide: 0.790 }, // panel 2
-    { show: 0.645, fadeIn: 0.660, fadeOut: 0.720, hide: 0.740 }, // garnish 1
-    { show: 0.724, fadeIn: 0.740, fadeOut: 0.780, hide: 0.790 }  // garnish 2
+    { show: 0.660, fadeIn: 0.680, fadeOut: 0.760, hide: 0.780 }, // panel 1: in frame t 0.68–0.76
+    { show: 0.730, fadeIn: 0.745, fadeOut: 0.780, hide: 0.790 }, // panel 2: in frame t 0.745–0.78
+    { show: 0.660, fadeIn: 0.680, fadeOut: 0.760, hide: 0.780 }, // garnish 1
+    { show: 0.730, fadeIn: 0.745, fadeOut: 0.780, hide: 0.790 }  // garnish 2
   ];
 
   const panelGroups = [panelGroup1, panelGroup2, garnishGroup1, garnishGroup2];

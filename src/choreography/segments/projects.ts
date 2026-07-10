@@ -484,25 +484,23 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
   // Fixed side pose at ramp2 (t 0.53–0.60)
   // Pull back to chase rising toward skyway (t 0.60–0.62)
 
-  // Side pose 1: perpendicular fixed pose looking at the +X wall
-  // Camera at (190, 10, -125) fov 46, looking at the arc + displays on the wall
-  // On mobile (portrait framing): fov +8 = 54, pull back 15% from wall.
-  // Desktop: camera at x=190 looking at wall x=251 → distance = 61m.
-  // Mobile: 61m * 1.15 = 70.15m → camera at x = 251 - 70.15 = 180.85 ≈ 181.
+  // Side pose 1: perpendicular fixed pose looking at the +X wall.
+  // I4 fix: moved camera closer (x=205 vs 190) and raised FOV (52 vs 46) so project
+  // displays and the arcing biker both read. Distance 251-205=46m vs 61m original.
+  // The biker arc peaks at y≈14, appearing larger in frame at this tighter angle.
   const side1Look = new THREE.Vector3(251, 12, -125);
-  const side1Fov = mobile ? 46 + 8 : 46;
+  const side1Fov = mobile ? 52 + 8 : 52;
   const side1Pos = mobile
-    ? new THREE.Vector3(251 - 61 * 1.15, 10, -125)
-    : new THREE.Vector3(190, 10, -125);
+    ? new THREE.Vector3(251 - 46 * 1.15, 10, -125)
+    : new THREE.Vector3(205, 10, -125);
 
-  // Side pose 2: second fixed side pose at ramp2
-  // Desktop: camera at x=190 looking at wall x=251 → distance = 61m (same wall).
-  // Mobile: same 15% pull-back.
+  // Side pose 2: second fixed side pose at ramp2.
+  // I4 fix: same camera pull-in as side1 for consistency.
   const side2Look = new THREE.Vector3(251, 7, -295);
-  const side2Fov = mobile ? 46 + 8 : 46;
+  const side2Fov = mobile ? 52 + 8 : 52;
   const side2Pos = mobile
-    ? new THREE.Vector3(251 - 61 * 1.15, 9, -295)
-    : new THREE.Vector3(190, 9, -295);
+    ? new THREE.Vector3(251 - 46 * 1.15, 9, -295)
+    : new THREE.Vector3(205, 9, -295);
 
   // Low chase pose at ramp1Base approach
   const chaseRamp1Pos = new THREE.Vector3(243, 1.4, -10);

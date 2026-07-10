@@ -134,9 +134,13 @@ export function registerDriftSegment(opts: DriftSegmentOptions): void {
   // t 0.38:  Hold exit frame (ramp1Base dead ahead).
   //           Same pose to stabilise the shot.
 
-  // WIDE pose (mid-drift): camera outside the corner on +Z side
-  const widePos  = new THREE.Vector3(270, 4, 50);
-  const wideLook = new THREE.Vector3(230, 1, -15);
+  // WIDE pose (mid-drift): camera outside the corner on +Z side.
+  // I3 fix: moved camera closer and tightened look target on the crossing/biker.
+  // Original (270,4,50) looking (230,1,-15) grazed a foreground building — right ~40% dark.
+  // New position (265,5,38): closer-in, slightly higher for cleaner sight-line.
+  // Look target (238,1,-5): biker mid-drift at shibuyaCenter, neon crossing as backdrop.
+  const widePos  = new THREE.Vector3(265, 5, 38);
+  const wideLook = new THREE.Vector3(238, 1, -5);
 
   // Low chase pose (exit): camera 10m past crossing (z=−10) on the boulevard,
   // 1.4m height, looking deep down the boulevard toward the ramp.

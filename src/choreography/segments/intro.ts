@@ -18,6 +18,7 @@ import * as THREE from 'three';
 import type { CameraRig } from '../cameraRig';
 import type { BikePath } from '../bikePath';
 import { ROUTE_U } from '../../world/route';
+import { RESUME } from '../../content/resume';
 // CSS color strings for use with CanvasRenderingContext2D
 const CSS = {
   moonlight: '#f5f0e6',
@@ -77,10 +78,14 @@ function drawIntroPanel(): THREE.CanvasTexture {
   ctx.fillStyle = CSS.moonlight;
   ctx.fillText('EVAN LI', cx, wordY);
 
-  // Tagline
+  // Tagline — derived from RESUME.tagline ("CS + Economics @ UW — ML Systems / On-Device Inference")
+  // I1 fix: was "FULL-STACK · SYSTEMS" (wrong); now reflects actual ML/edge focus.
+  // Tight form: split at "—" → right part "ML Systems / On-Device Inference" → reformat.
+  const tagRight = RESUME.tagline.split('—')[1]?.trim() ?? 'ML Systems / On-Device Inference';
+  const tagFormatted = tagRight.toUpperCase().replace('/', '·');
   ctx.font = '400 28px Rajdhani, sans-serif';
   ctx.fillStyle = CSS.tronCyan;
-  ctx.fillText('FULL-STACK · SYSTEMS · RESEARCH', cx, H * 0.68);
+  ctx.fillText(tagFormatted, cx, H * 0.68);
 
   // Scroll CTA
   ctx.font = '22px "Share Tech Mono", monospace';
@@ -202,14 +207,14 @@ export function registerIntroSegment(opts: IntroSegmentOptions): IntroSegmentHan
     // The t=0 camera is at (120, 190, -60) looking at (-260, 0, 0).
     //
     // Strategy: place the panel near the camera's look-at center and face it toward the camera.
-    // The panel is offset in anchor-local space to sit near the look-at point (slightly elevated).
     // Anchor local offset: look-at (-260,0,0) relative to anchor (-280,15,0) = (20,-15,0).
-    // Raise by 60 world units so it sits at mid-height in the overhead view: (20, 45, 0).
-    mesh.position.set(20, 45, 0);
+    // M1 fix: raised from y=45 to y=55 (world y=70) to clear foreground building tops
+    // and shifted z=-10 to step the panel slightly back in z to avoid building overlap.
+    mesh.position.set(20, 55, -10);
 
     // Direction from the mesh's world position to the t=0 camera.
-    // Mesh world pos ≈ (-280+20, 15+45, 0) = (-260, 60, 0)
-    const meshWorldPos = new THREE.Vector3(-260, 60, 0);
+    // M1 fix: mesh world pos ≈ (-280+20, 15+55, -10) = (-260, 70, -10)
+    const meshWorldPos = new THREE.Vector3(-260, 70, -10);
     const cameraPos = new THREE.Vector3(120, 190, -60);
     const toCamera = new THREE.Vector3().subVectors(cameraPos, meshWorldPos).normalize();
     // PlaneGeometry normal is +Z; rotate so +Z aligns with toCamera direction.

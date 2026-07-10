@@ -398,10 +398,12 @@ function makeMaterials(rng: Rng) {
     polygonOffsetFactor: -4,
     polygonOffsetUnits: -4
   });
+  // C1 fix: reduced emissiveIntensity 2.2 → 1.4 so bridge/skyway cyan edge-light strips
+  // read as crisp neon lines without blowing out under bloom at finale camera distances.
   const cyanEdge = new THREE.MeshStandardMaterial({
     color: COLORS.tronCyan,
     emissive: COLORS.tronCyan,
-    emissiveIntensity: 2.2,
+    emissiveIntensity: 1.4,
     roughness: 0.4,
     metalness: 0.2
   });

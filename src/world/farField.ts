@@ -480,9 +480,13 @@ function buildMoon(rng: Rng): THREE.Group {
     }
   });
 
+  // C1 fix: use a dimmed warm ivory (0xb8b0a0, ~72% of moonlight) instead of pure 0xffffff.
+  // Pure white + bloom = supernova blob. COLORS.moonlight (0xf5f0e6) still too bright at t=0.85;
+  // further dimmed to 0xb8b0a0 so crater texture detail + disc edge remain visible under bloom
+  // while keeping the warm moon character. t=0.19 (About, distant moon) verified still reads well.
   const sphere = new THREE.Mesh(
     new THREE.SphereGeometry(MOON_RADIUS, 48, 32),
-    new THREE.MeshBasicMaterial({ map: craterTex, color: 0xffffff, fog: false })
+    new THREE.MeshBasicMaterial({ map: craterTex, color: 0xb8b0a0, fog: false })
   );
   sphere.position.copy(MOON_POS);
   sphere.frustumCulled = false;
@@ -495,18 +499,20 @@ function buildMoon(rng: Rng): THREE.Group {
   // glitter streak. Shrinking + dimming the glow source starves that bloom bleed at
   // the source without touching bloom itself or the moon's own core brightness.
   const glowTex = makeRadialGlowTexture();
+  // C1 fix: reduced glow opacity 0.22 → 0.14 and scale 1.35 → 1.18 so the halo is
+  // soft rather than overwhelming. Moon still reads as a bright disc with visible edge.
   const glowMat = new THREE.SpriteMaterial({
     map: glowTex,
     color: COLORS.moonlight,
     transparent: true,
-    opacity: 0.22,
+    opacity: 0.14,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     fog: false
   });
   const glow = new THREE.Sprite(glowMat);
   glow.position.copy(MOON_POS);
-  const glowDiameter = MOON_RADIUS * 1.35 * 2;
+  const glowDiameter = MOON_RADIUS * 1.18 * 2;
   glow.scale.set(glowDiameter, glowDiameter, 1);
   group.add(glow);
 

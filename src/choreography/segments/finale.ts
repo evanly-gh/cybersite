@@ -84,9 +84,11 @@ const T_TYPE_STAY = 0.99;    // keep visible until here
 //   1.15: better but still bright at upper frame — mid-frame OK
 //   1.10: controlled — moon glow crisp, rails bright but not clipping, biker silhouette clear.
 //         This is the tasteful ceiling for this scene given moon+rail emissive baseline.
+// C1 fix (pass 1): After reducing moon color + glow + edge-light emissive, the raw scene
+// brightness is lower. Lowered BLOOM_PEAK 1.1 → 1.0 for additional margin at t=0.85-0.95.
 // EXPOSURE: 1.20 pushed detail out at t=0.97, 1.14 lifts shadows without blowing moon.
 const BLOOM_BASE  = 0.9;
-const BLOOM_PEAK  = 1.1;
+const BLOOM_PEAK  = 1.0;
 const EXPOSURE_BASE = 1.1;
 const EXPOSURE_PEAK = 1.14;
 
