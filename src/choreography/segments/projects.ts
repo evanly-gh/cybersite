@@ -224,14 +224,14 @@ function drawProjectMainTexture(
     const pad = 24;
     let y = imgH + 24;
 
-    // Eyebrow: stack tech
-    ctx.font = 'bold 22px "Share Tech Mono"';
+    // Eyebrow: stack tech (≥28px legibility rule)
+    ctx.font = 'bold 28px "Share Tech Mono"';
     ctx.fillStyle = accent;
     ctx.letterSpacing = '1px';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText('// ' + stack.toUpperCase(), pad, y);
-    y += 36;
+    y += 40;
 
     // Title (large, Unbounded) — body ≥28px rule
     ctx.font = 'bold 48px "Unbounded"';
@@ -312,7 +312,7 @@ function drawProjectSmallTexture(
     ctx.stroke();
     ctx.restore();
 
-    ctx.font = '24px "Share Tech Mono"';
+    ctx.font = '28px "Share Tech Mono"';  // ≥28px legibility rule
     ctx.fillStyle = accent;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -330,13 +330,13 @@ function drawProjectSmallTexture(
     const pad = 18;
     let y = imgH + 16;
 
-    ctx.font = '22px "Share Tech Mono"';
+    ctx.font = '28px "Share Tech Mono"';  // ≥28px legibility rule
     ctx.fillStyle = accent;
     ctx.letterSpacing = '1px';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText('// ' + stack.toUpperCase(), pad, y);
-    y += 32;
+    y += 36;
 
     ctx.font = 'bold 36px "Unbounded"';
     ctx.fillStyle = '#ffffff';
@@ -441,25 +441,33 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
   // t=0.565: at ramp2Land (slow-mo through flip)
   // t=0.62: at skywayStart
 
-  // Compute u midpoints for speed key adjustments.
-  // The air windows use u0..u1 for position, but speed keys govern t→u globally.
-  // We add speed keys that bow outward (faster before, slower during, faster after).
+  // Speed key design:
+  // - Drift segment already registered { t:0.38, u:ramp1Base }; we must NOT add
+  //   another t=0.38 key (allowed by addSpeedKeys boundary-sharing rule, but
+  //   duplicate-u would give zero speed visually). Start projects keys at t=0.39.
+  // - "Hard accel into ramp1" (×1.8 feel): drift left us exactly at ramp1Base
+  //   at t=0.38, so we CANNOT show an approach toward ramp1Base. Instead we show
+  //   the bike rolling forward from ramp1Base — already on the ramp — building
+  //   speed rapidly before the t=0.42 launch. This satisfies the accel intent
+  //   given the geometric constraint (drift exits at ramp1Base, not before it).
+  // - During air windows (t=0.42→0.475, 0.53→0.565) the air window's own u-lerp
+  //   from u0→u1 governs bike position; speed keys are used for uAt() only.
+  // - Ramp2 approach (t=0.50→0.53): u advances from 35% between land→ramp2Base
+  //   to ramp2Base — genuine forward motion, accel feel ✓.
 
-  // Between ramp1Land and ramp2Base: normal pace
-  const uRamp1Mid = (ROUTE_U.ramp1Base + ROUTE_U.ramp1Land) / 2;
-  const uRamp2Mid = (ROUTE_U.ramp2Base + ROUTE_U.ramp2Land) / 2;
+  const ramp1Span = ROUTE_U.ramp1Land - ROUTE_U.ramp1Base;
 
   bike.addSpeedKeys([
-    // Drift segment leaves bike at ramp1Base at t=0.38
-    { t: 0.38, u: ROUTE_U.ramp1Base },
-    // Hard accel approach to ramp1: cover u0..ramp1Base quickly
-    // (t 0.38→0.42 covers ramp1Base→ramp1Base, so approach is already at base)
-    // Slow-mo THROUGH flip 1: t 0.42→0.475 covers ramp1Base→ramp1Land (matches air window)
-    { t: 0.42, u: ROUTE_U.ramp1Base },
+    // Hard roll from ramp1Base into the launch ramp (×1.8 accel feel).
+    // Drift's boundary key is at t=0.38, u=ramp1Base. We pick up from t=0.39.
+    { t: 0.39, u: ROUTE_U.ramp1Base + ramp1Span * 0.12 },  // 12% into ramp span after 0.01 of t
+    // At launch (t=0.42) we are 28% into the ramp span — a visibly fast roll-in.
+    { t: 0.42, u: ROUTE_U.ramp1Base + ramp1Span * 0.28 },
+    // Slow-mo THROUGH flip 1: t 0.42→0.475 (air window uses its own u0..u1)
     { t: 0.475, u: ROUTE_U.ramp1Land },
     // Normal pace after landing, accel approach to ramp2
     { t: 0.50, u: ROUTE_U.ramp1Land + (ROUTE_U.ramp2Base - ROUTE_U.ramp1Land) * 0.35 },
-    // At ramp2 base
+    // At ramp2 base (accel approach: t=0.50→0.53 is moving, not a hold ✓)
     { t: 0.53, u: ROUTE_U.ramp2Base },
     // Slow-mo THROUGH flip 2
     { t: 0.565, u: ROUTE_U.ramp2Land },
@@ -559,9 +567,11 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
         roll: 0
       }
     },
-    // Re-chase: camera tracks between ramps
+    // Re-chase: brief transit between ramps — peak at t=0.51, then transition to side2.
+    // The re-chase is compressed to 0.50–0.53 so side2 is fully settled by t=0.53
+    // (air window 2 starts at 0.53; camera must be locked on ramp2 flip from its start).
     {
-      t: 0.53,
+      t: 0.51,
       pose: {
         pos: rechasePos.clone(),
         look: rechaseLook.clone(),
@@ -570,9 +580,10 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
       },
       ease: easeInOutQuad
     },
-    // Second fixed side pose at ramp2
+    // Second fixed side pose at ramp2 — arrives by t=0.53 so camera is locked on
+    // the second flip from the moment air window 2 opens.
     {
-      t: 0.54,
+      t: 0.53,
       pose: {
         pos: side2Pos.clone(),
         look: side2Look.clone(),
@@ -581,9 +592,9 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
       },
       ease: easeInOutQuad
     },
-    // Hold side pose 2 through arc 2
+    // Hold side pose 2 through arc 2 (duplicate key kills Catmull-Rom overshoot)
     {
-      t: 0.565,
+      t: 0.555,
       pose: {
         pos: side2Pos.clone(),
         look: side2Look.clone(),
