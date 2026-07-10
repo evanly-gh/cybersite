@@ -30,6 +30,7 @@ import { initMaster } from './choreography/master';
 import { registerIntroSegment } from './choreography/segments/intro';
 import { registerAboutSegment } from './choreography/segments/about';
 import { registerDriftSegment } from './choreography/segments/drift';
+import { registerProjectsSegment } from './choreography/segments/projects';
 
 // Loader
 import { createLoader } from './ui/loader';
@@ -139,6 +140,14 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
     rig,
     bike: bikePath
   });
+
+  // Register projects segment (ramp backflips, t 0.38–0.62)
+  const projectsSegment = registerProjectsSegment({
+    rig,
+    bike: bikePath,
+    anchors: city.anchors,
+    updatables
+  });
   loader.setProgress(90);
 
   loader.setProgress(100);
@@ -154,6 +163,7 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
     city.updateAmbient(sec);
     farField.updateAmbient(sec);
     aboutSegment.updateAmbient(sec);
+    projectsSegment.updateAmbient(sec);
   });
 
   if (isShotMode) {

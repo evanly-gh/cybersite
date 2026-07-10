@@ -36,9 +36,14 @@ import { makeRng } from '../utils/rng';
 /** Drift window in scroll t. */
 export const DRIFT_WINDOW = { tStart: 0.30, tEnd: 0.345 } as const;
 
-/** Ramp-landing smoke windows. */
+/** Ramp-landing smoke windows.
+ * Task 28 retune: start at the t1 of each air window (exact touchdown moment)
+ * and extend for a short skid duration afterward.
+ * Air window 1 t1 = 0.475 → landing starts here.
+ * Air window 2 t1 = 0.565 → landing starts here.
+ */
 export const LANDING_WINDOWS = [
-  { tStart: 0.475, tEnd: 0.49 },
+  { tStart: 0.475, tEnd: 0.490 },
   { tStart: 0.565, tEnd: 0.578 }
 ] as const;
 
