@@ -292,8 +292,6 @@ registerAsset('driftScene', () => {
   const steam = buildSteam(steamAnchors);
   group.add(steam.group);
 
-  let lastSec = 0;
-
   return {
     group,
     update(t: number) {
@@ -312,8 +310,7 @@ registerAsset('driftScene', () => {
       pools.update(t);
     },
     updateAmbient(sec: number) {
-      lastSec = sec;
-      steam.updateAmbient(lastSec);
+      steam.updateAmbient(sec);
     }
   };
 });

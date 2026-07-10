@@ -10,9 +10,9 @@
  *  - tailAnchor  → red, 3×2 m, behind vehicle
  *  - Bike-specific: adds stronger cyan cone + 10×6 m pool on the headAnchor
  *
- * The bike headAnchor is detected by parent-traversal: if the root Object3D has
- * `userData.headAnchor === anchor` it is treated as "the bike" and gets the
- * extra cyan cone. Regular cars get the warm-white head pool only.
+ * The bike headAnchor is detected by a simple heuristic: if the root Object3D has
+ * `vehicle.name === 'bike' || vehicle.userData.isBike === true` it is treated as
+ * "the bike" and gets the extra cyan cone. Regular cars get the warm-white head pool only.
  *
  * Additive blending, depthWrite: false (bloom-friendly, no z-fighting).
  */
@@ -139,10 +139,11 @@ const tailTex = radialPoolTex(TAIL_COLOR);
  * by reading the anchor's world transform, making them a pure f(t) (since the
  * vehicles themselves move as f(t)).
  *
- * The bike is detected by `vehicle.userData.headAnchor === vehicle.userData.headAnchor`
- * and the presence of `userData.isBike === true` on the root, OR by the vehicle
- * having a cyan headlight. We use a simple heuristic: if the vehicle's group
- * name is 'bike' it gets the extra cyan cone.
+ * The bike is detected by `vehicle.name === 'bike' || vehicle.userData.isBike === true`.
+ * (Task 25 will give the bike a stable identity; the name heuristic is intentional here.)
+ *
+ * @precondition Caller must ensure vehicle world matrices are current
+ * (scene.updateMatrixWorld or a prior render) before calling update(t).
  */
 export function buildLightPools(vehicles: THREE.Object3D[]): LightPools {
   const group = new THREE.Group();

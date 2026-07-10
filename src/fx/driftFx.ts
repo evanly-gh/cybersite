@@ -43,13 +43,13 @@ export const LANDING_WINDOWS = [
 ] as const;
 
 /** Half-track width: skid lines are ±WHEEL_TRACK from the route center. */
-const WHEEL_TRACK = 0.35;
+export const WHEEL_TRACK = 0.35;
 
 /** Number of tire-smoke sprites per window. */
-const SMOKE_COUNT = 40;
+export const SMOKE_COUNT = 40;
 
 /** Number of ribbon segments for the skid arc geometry. */
-const SKID_SEGMENTS = 32;
+export const SKID_SEGMENTS = 32;
 
 // ---------------------------------------------------------------------------
 // Helpers
