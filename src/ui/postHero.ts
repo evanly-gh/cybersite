@@ -19,7 +19,13 @@
 
 import { RESUME } from '../content/resume';
 
-/** Attach IntersectionObserver to trigger glitch-in animation once per heading. */
+/** Attach IntersectionObserver to trigger glitch-in animation once per heading.
+ *
+ * Belt-and-suspenders: a 1 500 ms fallback timer ensures every heading becomes
+ * visible even if the IntersectionObserver never fires (JS error, browser
+ * extension, element already in-viewport at load, etc.).  The glitch-in
+ * animation is a progressive enhancement — visibility must never depend on it.
+ */
 function observeHeadings(root: HTMLElement): void {
   const io = new IntersectionObserver(
     (entries) => {
@@ -34,6 +40,19 @@ function observeHeadings(root: HTMLElement): void {
   );
 
   root.querySelectorAll('.ph-heading').forEach((el) => io.observe(el));
+
+  // Fallback: after 1 500 ms, force-show any heading not yet made visible by the
+  // observer (covers observer misfire, early-in-viewport elements, etc.).
+  const fallbackTimer = setTimeout(() => {
+    root.querySelectorAll('.ph-heading:not(.ph-heading--visible)').forEach((el) => {
+      el.classList.add('ph-heading--visible');
+    });
+  }, 1500);
+
+  // If the page is unloaded before the timer fires, cancel it to avoid leaks.
+  // We use a one-shot 'pagehide' listener so this doesn't accumulate.
+  const cleanup = (): void => clearTimeout(fallbackTimer);
+  window.addEventListener('pagehide', cleanup, { once: true });
 }
 
 /** Build the #education section. */
@@ -163,7 +182,17 @@ function buildSkills(): HTMLElement {
       const li = document.createElement('li');
       li.className = 'ph-chip';
 
-      // Use button for interactive focus/hover behaviour while staying in list
+      // Design choice: chips use <button type="button"> rather than inert <span>/<li>.
+      // Rationale: the hover/focus group-dim effect (dimming other skill groups) is
+      // meaningful for keyboard users — it lets them understand skill groupings while
+      // navigating.  Buttons expose this interaction to AT users via focus events, which
+      // trigger the same highlight/dim logic as mouse-hover.
+      // Accessibility contract: no action is announced to AT because aria-label names the
+      // chip content + category, and no role="button" expansion (AT reads it as "chip —
+      // category, button") is misleading only if the button truly does nothing; here it
+      // visually communicates skill grouping — a deliberate interaction, not dead markup.
+      // If in future the group-dim effect is dropped, replace buttons with <span> + CSS
+      // :hover/:focus-within on the parent group.
       const btn = document.createElement('button');
       btn.className = 'ph-chip-btn mono';
       btn.textContent = chip;
@@ -267,8 +296,10 @@ function buildExperience(): HTMLElement {
   achEyebrow.className = 'ph-eyebrow mono';
   achEyebrow.textContent = '// 04 ACHIEVEMENTS';
 
-  const achHeading = document.createElement('h2');
-  achHeading.className = 'ph-heading display';
+  // h3: achievements is a subsection of #experience (one section, one h2).
+  // Using h3 keeps the document outline clean — no two h2s in the same section.
+  const achHeading = document.createElement('h3');
+  achHeading.className = 'ph-heading ph-heading--h3 display';
   achHeading.textContent = 'ACHIEVEMENTS';
   achHeading.setAttribute('id', 'ach-heading');
 

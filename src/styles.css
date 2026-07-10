@@ -199,9 +199,17 @@ main {
   margin: 0 0 3rem 0;
 }
 
-/* Glitch-in: fires once on first intersection */
+/* Glitch-in: fires once on first intersection.
+ * animation-fill-mode: forwards ensures the final keyframe (opacity:1) is
+ * retained after the animation completes — heading stays visible. */
 .ph-heading--visible {
   animation: ph-glitch-in 0.6s steps(1) forwards;
+}
+
+/* Achievements heading is an h3 (subsection of #experience) — slightly smaller
+ * than the section h2 but still display-font, same glitch-in behaviour. */
+.ph-heading--h3 {
+  font-size: clamp(1.8rem, 4.5vw, 3rem);
 }
 
 @keyframes ph-glitch-in {
@@ -450,8 +458,12 @@ main {
   gap: 0.5rem;
 }
 
+/* <li class="ph-chip"> must NOT use display:contents — that drops the element
+ * from the a11y tree in some screen readers, breaking "N of M" list-item
+ * announcements.  Instead we style the li as a normal inline-flex container so
+ * the chip button inside participates in the flex-wrap chip-list layout. */
 .ph-chip {
-  display: contents;
+  display: inline-flex;
 }
 
 .ph-chip-btn {
@@ -472,8 +484,8 @@ main {
   border-radius: 0;
 }
 
-.ph-chip-btn:hover,
-.ph-chip-btn:focus-visible {
+/* Hover: neon glow + border, no outline needed (pointer interaction). */
+.ph-chip-btn:hover {
   border-color: var(--tron-cyan);
   color: var(--tron-cyan);
   box-shadow:
@@ -481,6 +493,20 @@ main {
     0 0 12px rgba(0, 240, 255, 0.35),
     0 0 24px rgba(0, 240, 255, 0.15);
   outline: none;
+}
+
+/* Focus-visible (keyboard): WCAG 2.2 Focus Appearance — retain the 2px cyan
+ * outline (satisfies minimum focus indicator) AND add the box-shadow glow as a
+ * supplement.  Do NOT suppress outline here. */
+.ph-chip-btn:focus-visible {
+  border-color: var(--tron-cyan);
+  color: var(--tron-cyan);
+  outline: 2px solid var(--tron-cyan);
+  outline-offset: 2px;
+  box-shadow:
+    0 0 0 1px var(--tron-cyan),
+    0 0 12px rgba(0, 240, 255, 0.35),
+    0 0 24px rgba(0, 240, 255, 0.15);
 }
 
 /* ---- Experience section ---- */
