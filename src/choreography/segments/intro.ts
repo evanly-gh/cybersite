@@ -229,11 +229,20 @@ export function registerIntroSegment(opts: IntroSegmentOptions): IntroSegmentHan
     // Register as an updatable that handles the t=0.03→0.05 fade-out
     opts.updatables.push({
       update(t: number): void {
-        // When the scroll hint pulse is active at t=0, honour the hint opacity
+        // When the scroll hint pulse is active at t=0, honour the hint opacity.
+        // The pulse rAF loop (reducedMotion.ts) calls pulseScrollHint each frame and
+        // writes mat.opacity directly — so this guard only needs to skip the t-driven
+        // fade while the hint is active (prevents fighting between the two controllers).
         if (scrollHintOpacity !== null && t <= SCROLL_HINT_T_MAX) {
-          mat.opacity = scrollHintOpacity;
+          // Pulse owns opacity — mat.opacity is already set by pulseScrollHint each frame.
           mesh.visible = true;
           return;
+        }
+        // Hint pulse has ended (or was never active at this t). Relinquish control by
+        // clearing any stale override so a future t≤SCROLL_HINT_T_MAX visit doesn't
+        // re-apply the last pulsed value.
+        if (scrollHintOpacity !== null) {
+          scrollHintOpacity = null;
         }
         if (t <= 0.03) {
           mat.opacity = 1;
@@ -251,7 +260,16 @@ export function registerIntroSegment(opts: IntroSegmentOptions): IntroSegmentHan
 
     return {
       pulseScrollHint(opacity: number): void {
-        scrollHintOpacity = Math.max(0, Math.min(1, opacity));
+        const clamped = Math.max(0, Math.min(1, opacity));
+        scrollHintOpacity = clamped;
+        // Write directly to the material so the render loop (core.tick → composer.render)
+        // picks up the new opacity every frame — without waiting for setProgress/update(t)
+        // to be called. This is the critical fix: at t=0 with an idle user, setProgress
+        // is never called, so the updatable's update() never runs. By writing mat.opacity
+        // here, the pulse drives the GPU material each rAF frame immediately.
+        mat.opacity = clamped;
+        // Test hook: expose current opacity so Playwright can verify the pulse is animating.
+        if (typeof window !== 'undefined') window.__introMatOpacity = clamped;
       }
     };
   }
