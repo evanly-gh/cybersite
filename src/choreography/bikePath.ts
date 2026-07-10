@@ -51,6 +51,52 @@ interface AirWindow {
   flips: number;
 }
 
+/**
+ * Drift override window.  All values produce pure f(t) overrides applied on
+ * top of the base ground-state heading / lean / position.
+ *
+ * Within [t0, t1]:
+ *   - Heading (yaw) is over-rotated by `oversteerDeg` * decay(t) degrees,
+ *     where decay = 1 − smoothstep(t0, t1, t).
+ *   - Lean is forced to `leanDeg` (signed: negative = left-lean into a
+ *     right turn).
+ *   - The rear-wheel lateral slide: the bike position is offset by
+ *     `slideM` metres along the world binormal, decaying with the same curve.
+ *
+ * After t1 (wobble):
+ *   A damped sine counter-lean is added: amplitude * damping * sin(2π * freq * dt)
+ *   where dt = t − t1, amplitude = leanDeg * wobbleAmp, freq derived from
+ *   wobbleCycles and wobbleDuration.  The wobble fully settles by
+ *   t1 + wobbleDuration.
+ */
+export interface DriftWindowOpts {
+  t0: number;
+  t1: number;
+  /** Yaw over-rotation at peak, degrees.  Positive = front points outward (right-turn oversteer). */
+  oversteerDeg: number;
+  /** Peak lean into the turn, degrees.  Positive value → lean applied toward turn inside. */
+  leanDeg: number;
+  /** Rear-wheel lateral slide offset at peak, metres (positive = toward outside of turn). */
+  slideM: number;
+  /** Number of damped counter-lean oscillations after exit. */
+  wobbleCycles: number;
+  /** Duration of the wobble (in t units) after t1. */
+  wobbleDuration?: number; // default 0.02
+  /** Fraction of leanDeg used as wobble amplitude. */
+  wobbleAmp?: number; // default 0.4
+}
+
+interface DriftWindow {
+  t0: number;
+  t1: number;
+  oversteerRad: number;
+  leanRad: number;
+  slideM: number;
+  wobbleCycles: number;
+  wobbleDuration: number;
+  wobbleAmp: number;
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -77,6 +123,12 @@ const _tmpAxisAngle = new THREE.Quaternion();
 /** easeInOutSine: smooth 0→1 */
 function easeInOutSine(x: number): number {
   return -(Math.cos(Math.PI * x) - 1) / 2;
+}
+
+/** GLSL-style smoothstep: 0 below edge0, 1 above edge1, smooth Hermite in between */
+function _smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / Math.max(edge1 - edge0, 1e-9)));
+  return t * t * (3 - 2 * t);
 }
 
 /** Lateral weave offset in metres (pure f(u)) */
@@ -118,6 +170,7 @@ function plerpU(keys: SpeedKey[], t: number): number {
 export class BikePath {
   private speedKeys: SpeedKey[] = [];
   private airWindows: AirWindow[] = [];
+  private driftWindows: DriftWindow[] = [];
 
   /**
    * Register speed keys (t→u mapping segments).
@@ -166,6 +219,56 @@ export class BikePath {
   }
 
   /**
+   * Register a drift override window.
+   *
+   * Within [t0, t1] the base ground-state heading, lean, and position are
+   * augmented:
+   *  - Heading (yaw): extra over-rotation of `oversteerDeg`, decaying linearly
+   *    to 0 at t1 (front of bike slides outward through the corner).
+   *  - Lean: forced to `leanDeg` (toward turn inside), blending from base lean
+   *    at t0 to full `leanDeg` over the first 20% of the window, held, then
+   *    releasing back toward base lean at t1.
+   *  - Position: lateral slide of `slideM` metres (rear wheel pushes outward),
+   *    decaying with the same envelope as oversteer.
+   *
+   * After t1 (wobble region, lasting `wobbleDuration` in t units):
+   *  A damped-sine counter-lean is added:
+   *    lean_extra = −leanRad * wobbleAmp * exp(−5*p) * sin(2π * wobbleCycles * p)
+   *  where p = (t − t1) / wobbleDuration ∈ [0, 1].
+   *  This is a pure f(t) — scrub-safe.
+   *
+   * Multiple drift windows must not overlap (checked at registration).
+   * Task 28 may call this method again with different parameters.
+   */
+  addDriftWindow(opts: DriftWindowOpts): void {
+    const { t0, t1, oversteerDeg, leanDeg, slideM, wobbleCycles } = opts;
+    const wobbleDuration = opts.wobbleDuration ?? 0.02;
+    const wobbleAmp = opts.wobbleAmp ?? 0.4;
+
+    // Check overlap with existing drift windows
+    for (const existing of this.driftWindows) {
+      const tEnd = existing.t1 + existing.wobbleDuration;
+      if (t0 < tEnd && t1 > existing.t0) {
+        throw new Error(
+          `BikePath.addDriftWindow: overlapping drift windows ` +
+          `[${t0}, ${t1}] and [${existing.t0}, ${existing.t1}]`
+        );
+      }
+    }
+
+    this.driftWindows.push({
+      t0,
+      t1,
+      oversteerRad: THREE.MathUtils.degToRad(oversteerDeg),
+      leanRad: THREE.MathUtils.degToRad(leanDeg),
+      slideM,
+      wobbleCycles,
+      wobbleDuration,
+      wobbleAmp
+    });
+  }
+
+  /**
    * Returns the arc-length parameter u at scroll progress t.
    * u is monotonic non-decreasing by construction of the piecewise-linear speed keys.
    * Exposed for testability.
@@ -177,6 +280,10 @@ export class BikePath {
   /**
    * Compute bike state for scroll progress t ∈ [0, 1].
    * Pure function of t — no side effects, no state mutation.
+   *
+   * If a drift window is registered and t is within [t0, t1 + wobbleDuration],
+   * the ground state is post-processed by _applyDriftOverride() which adds the
+   * yaw over-rotation, forced lean, lateral slide, and exit counter-lean wobble.
    */
   state(t: number): BikeState {
     const tClamped = Math.max(0, Math.min(1, t));
@@ -188,7 +295,101 @@ export class BikePath {
       }
     }
 
-    return this._groundState(tClamped);
+    const groundState = this._groundState(tClamped);
+
+    // Apply drift override if t is in a drift window or its wobble tail
+    for (const drift of this.driftWindows) {
+      const tWobbleEnd = drift.t1 + drift.wobbleDuration;
+      if (tClamped >= drift.t0 && tClamped <= tWobbleEnd) {
+        return this._applyDriftOverride(groundState, tClamped, drift);
+      }
+    }
+
+    return groundState;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Drift override — post-processes a ground BikeState within a drift window
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Apply drift physics overrides (yaw, lean, lateral slide, exit wobble) to
+   * an already-computed ground state.  Returns a NEW BikeState — never mutates
+   * the input.
+   *
+   * All computations are pure f(t) — scrub-safe, no accumulation.
+   */
+  private _applyDriftOverride(base: BikeState, t: number, drift: DriftWindow): BikeState {
+    const { t0, t1, oversteerRad, leanRad, slideM, wobbleCycles, wobbleDuration, wobbleAmp } = drift;
+
+    let extraYaw = 0;
+    let forcedLean = 0;
+    let lateralSlide = 0;
+
+    if (t <= t1) {
+      // Inside the drift window [t0, t1]
+      // Progress 0→1 through the window
+      const winLen = Math.max(t1 - t0, 1e-9);
+      const p = (t - t0) / winLen;
+
+      // Oversteer: peak at t0, decays linearly to 0 at t1
+      // Use smoothstep so it's not a sudden spike at entry but still covers full window
+      const oversteerDecay = 1 - _smoothstep(0, 1, p);
+      extraYaw = oversteerRad * oversteerDecay;
+
+      // Lean: ramp 0→1 over first 20%, hold, release last 20%
+      const leanEnvelope = _smoothstep(0, 0.2, p) * (1 - _smoothstep(0.8, 1, p));
+      forcedLean = leanRad * leanEnvelope;
+
+      // Lateral slide: same decay as oversteer (rear-end slides, decays as grip returns)
+      lateralSlide = slideM * oversteerDecay;
+    } else {
+      // In the wobble tail [t1, t1 + wobbleDuration]
+      const wobLen = Math.max(wobbleDuration, 1e-9);
+      const p = (t - t1) / wobLen; // 0→1 over the wobble duration
+
+      // Damped-sine: exp(-5*p) * sin(2π * wobbleCycles * p)
+      // Counter-lean direction: negative of leanRad (lean reverses after exit snap)
+      const damped = Math.exp(-5 * p) * Math.sin(2 * Math.PI * wobbleCycles * p);
+      forcedLean = -leanRad * wobbleAmp * damped;
+
+      // No extra yaw or slide after exit
+      extraYaw = 0;
+      lateralSlide = 0;
+    }
+
+    // --- Apply yaw over-rotation to quat ---
+    // Rotate around world Y axis by extraYaw (positive = front slides right = outward for right turn)
+    const yawQuat = new THREE.Quaternion().setFromAxisAngle(_tmpUp, extraYaw);
+    const newQuat = yawQuat.multiply(base.quat.clone());
+
+    // --- Apply lean override ---
+    // Lean is applied around the forward (tangent) axis in bike space.
+    // We extract the right-axis from the base quat and rotate around it.
+    // The lean in pose is just overwritten; the visual tilt is expressed in pose.lean.
+    const newPose: BikePose = {
+      lean: forcedLean !== 0 ? forcedLean : base.pose.lean,
+      pitch: base.pose.pitch,
+      crouch: base.pose.crouch,
+      wheelSpin: base.pose.wheelSpin
+    };
+
+    // --- Apply lateral slide offset ---
+    // Offset pos along the route binormal at this u
+    let newPos = base.pos.clone();
+    if (Math.abs(lateralSlide) > 1e-6) {
+      const u = this.uAt(t);
+      const frame = roadFrame(Math.max(0, Math.min(1, u)));
+      newPos.addScaledVector(frame.binormal, lateralSlide);
+    }
+
+    return {
+      pos: newPos,
+      quat: newQuat,
+      speed: base.speed,
+      airborne: false,
+      pose: newPose
+    };
   }
 
   // ---------------------------------------------------------------------------

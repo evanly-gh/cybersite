@@ -240,4 +240,134 @@ describe('BikePath', () => {
     expect(s1.quat.z).toBeCloseTo(snap.z, 10);
     expect(s1.quat.w).toBeCloseTo(snap.w, 10);
   });
+
+  // ---- drift override tests (Task 27) ----------------------------------------
+
+  describe('addDriftWindow', () => {
+    function makeDriftBike() {
+      const bp = new BikePath();
+      bp.addSpeedKeys([
+        { t: 0,    u: ROUTE_U.introStart },
+        { t: 0.10, u: ROUTE_U.aboutStart + 0.02 },
+        { t: 0.28, u: ROUTE_U.aboutEnd },
+        { t: 0.38, u: ROUTE_U.ramp1Base }
+      ]);
+      return bp;
+    }
+
+    it('state(t) returns airborne=false and no NaN inside drift window', () => {
+      const bp = makeDriftBike();
+      bp.addDriftWindow({
+        t0: 0.30, t1: 0.345,
+        oversteerDeg: 28,
+        leanDeg: 33,
+        slideM: 0.4,
+        wobbleCycles: 2,
+        wobbleDuration: 0.02
+      });
+
+      for (let i = 0; i <= 20; i++) {
+        const t = 0.30 + (i / 20) * (0.345 - 0.30);
+        const s = bp.state(t);
+        expect(s.airborne).toBe(false);
+        expect(isFinite(s.pos.x)).toBe(true);
+        expect(isFinite(s.pos.y)).toBe(true);
+        expect(isFinite(s.pos.z)).toBe(true);
+        expect(isFinite3(s.quat)).toBe(true);
+        expect(isFinite(s.pose.lean)).toBe(true);
+      }
+    });
+
+    it('drift override applies extra yaw (quat differs from ground state) inside window', () => {
+      const bp = makeDriftBike();
+      bp.addDriftWindow({
+        t0: 0.30, t1: 0.345,
+        oversteerDeg: 28,
+        leanDeg: 33,
+        slideM: 0.4,
+        wobbleCycles: 2
+      });
+
+      // At t=0.30 (start of window), oversteer should peak — quat should differ from base.
+      // We compare the y-component of the quat which encodes yaw.
+      // Build a reference BikePath without drift override.
+      const bpBase = makeDriftBike();
+      const base = bpBase.state(0.305);
+      const withDrift = bp.state(0.305);
+
+      // The quats must differ (oversteer adds yaw rotation)
+      const dot = base.quat.dot(withDrift.quat);
+      // dot = cos(halfAngle between quats); if they were identical, dot=1.0
+      expect(Math.abs(dot)).toBeLessThan(1.0 - 1e-6);
+    });
+
+    it('drift override: lean is forced inside window and returns toward base after wobble settles', () => {
+      const bp = makeDriftBike();
+      const DRIFT_T0 = 0.30;
+      const DRIFT_T1 = 0.345;
+      const WOBBLE_DUR = 0.02;
+      bp.addDriftWindow({
+        t0: DRIFT_T0, t1: DRIFT_T1,
+        oversteerDeg: 28,
+        leanDeg: 33,
+        slideM: 0.4,
+        wobbleCycles: 2,
+        wobbleDuration: WOBBLE_DUR
+      });
+
+      // Inside drift window: lean should be significant (>10°) near the middle
+      const midState = bp.state((DRIFT_T0 + DRIFT_T1) / 2);
+      const midLeanDeg = Math.abs(midState.pose.lean) * (180 / Math.PI);
+      expect(midLeanDeg).toBeGreaterThan(10);
+
+      // Well after the wobble settles: lean should be close to ground-state lean
+      const tAfter = DRIFT_T1 + WOBBLE_DUR + 0.005;
+      const afterState = bp.state(tAfter);
+      const bpBase2 = makeDriftBike();
+      const baseAfter = bpBase2.state(tAfter);
+      // Lean should be within 2° of base after wobble (wobble has exp(-5) ≈ 0.007 decay)
+      const leanDiff = Math.abs(afterState.pose.lean - baseAfter.pose.lean) * (180 / Math.PI);
+      expect(leanDiff).toBeLessThan(2);
+    });
+
+    it('state(t) is NaN-free through the full drift + wobble region', () => {
+      const bp = makeDriftBike();
+      bp.addDriftWindow({
+        t0: 0.30, t1: 0.345,
+        oversteerDeg: 28,
+        leanDeg: 33,
+        slideM: 0.4,
+        wobbleCycles: 2,
+        wobbleDuration: 0.02
+      });
+
+      // Sample densely from before drift through after wobble
+      for (let i = 0; i <= 100; i++) {
+        const t = 0.28 + (i / 100) * (0.38 - 0.28);
+        const s = bp.state(t);
+        expect(isFinite(s.pos.x)).toBe(true);
+        expect(isFinite(s.pos.y)).toBe(true);
+        expect(isFinite(s.pos.z)).toBe(true);
+        expect(isFinite3(s.quat)).toBe(true);
+        expect(isFinite(s.pose.lean)).toBe(true);
+      }
+    });
+
+    it('addDriftWindow throws on overlapping windows', () => {
+      const bp = makeDriftBike();
+      bp.addDriftWindow({ t0: 0.30, t1: 0.345, oversteerDeg: 28, leanDeg: 33, slideM: 0.4, wobbleCycles: 2 });
+      expect(() => {
+        bp.addDriftWindow({ t0: 0.34, t1: 0.36, oversteerDeg: 10, leanDeg: 10, slideM: 0.1, wobbleCycles: 1 });
+      }).toThrow(/overlapping drift windows/i);
+    });
+
+    it('addDriftWindow does NOT throw for non-overlapping windows', () => {
+      const bp = makeDriftBike();
+      bp.addDriftWindow({ t0: 0.30, t1: 0.345, oversteerDeg: 28, leanDeg: 33, slideM: 0.4, wobbleCycles: 2, wobbleDuration: 0.01 });
+      // Second window well after the wobble tail ends at 0.355
+      expect(() => {
+        bp.addDriftWindow({ t0: 0.36, t1: 0.38, oversteerDeg: 10, leanDeg: 10, slideM: 0.1, wobbleCycles: 1 });
+      }).not.toThrow();
+    });
+  });
 });

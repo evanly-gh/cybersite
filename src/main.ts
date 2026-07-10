@@ -29,6 +29,7 @@ import { BikePath } from './choreography/bikePath';
 import { initMaster } from './choreography/master';
 import { registerIntroSegment } from './choreography/segments/intro';
 import { registerAboutSegment } from './choreography/segments/about';
+import { registerDriftSegment } from './choreography/segments/drift';
 
 // Loader
 import { createLoader } from './ui/loader';
@@ -131,6 +132,12 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
     bike: bikePath,
     anchors: city.anchors,
     updatables
+  });
+
+  // Register drift segment keys (Shibuya crossing, t 0.28–0.38)
+  registerDriftSegment({
+    rig,
+    bike: bikePath
   });
   loader.setProgress(90);
 
