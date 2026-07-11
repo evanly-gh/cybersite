@@ -112,6 +112,8 @@ export interface SandevistanTrail {
   update(t: number): void;
   /** Clear all accumulated state. Call when forcing a full rebuild (e.g. large scrub jump). */
   reset(): void;
+  /** Number of snapshots currently in the buffer. Used by callers to detect an under-seeded trail. */
+  readonly snapshotCount: number;
 }
 
 export function buildSandevistan(ghostGeom: THREE.BufferGeometry): SandevistanTrail {
@@ -124,7 +126,7 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): SandevistanTr
     depthWrite: false,
     vertexColors: true,  // enables instanceColor on InstancedMesh
     transparent: true,
-    side: THREE.FrontSide
+    side: THREE.DoubleSide
   });
 
   // -------------------------------------------------------------------------
@@ -147,7 +149,7 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): SandevistanTr
     depthWrite: false,
     vertexColors: true,
     transparent: true,
-    side: THREE.FrontSide
+    side: THREE.DoubleSide
   });
   const echoMatB = new THREE.MeshBasicMaterial({
     color: 0xffffff,
@@ -155,7 +157,7 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): SandevistanTr
     depthWrite: false,
     vertexColors: true,
     transparent: true,
-    side: THREE.FrontSide
+    side: THREE.DoubleSide
   });
 
   const echoMeshR = new THREE.InstancedMesh(ghostGeom, echoMatR, ECHO_GHOST_COUNT);
@@ -308,15 +310,19 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): SandevistanTr
 
       mesh.setMatrixAt(i, tmpMat);
 
-      // Per-instance colour encodes hue + brightness (additive = magnitude = opacity)
+      // Per-instance colour encodes hue + brightness (additive = magnitude = opacity).
+      // Brightness range: 0 = invisible, 1 = fully bright. Values >1 contribute to bloom.
+      // Finale is the "money-shot" so it gets a higher base brightness to read clearly
+      // against the dark ocean.
       if (isFinale) {
-        const brightness = THREE.MathUtils.lerp(0.7, 0.08, tGhost);
-        tmpColor.copy(finaleColor(tGhost)).multiplyScalar(brightness * 2.5); // boost for bloom
+        // head→tail: 1.0→0.12 brightness × 4.0 boost = 4.0→0.48 (strongly bloomed head)
+        const brightness = THREE.MathUtils.lerp(1.0, 0.12, tGhost);
+        tmpColor.copy(finaleColor(tGhost)).multiplyScalar(brightness * 4.0);
         mesh.setColorAt(i, tmpColor);
       } else {
-        // ride: gradient cyan→magenta→violet, opacity 0.55→0.05
-        const brightness = THREE.MathUtils.lerp(0.55, 0.05, tGhost);
-        tmpColor.copy(rideColor(tGhost)).multiplyScalar(brightness * 3.0); // boost for bloom
+        // ride: cyan→magenta→violet, head→tail: 0.85→0.08 × 3.5 boost
+        const brightness = THREE.MathUtils.lerp(0.85, 0.08, tGhost);
+        tmpColor.copy(rideColor(tGhost)).multiplyScalar(brightness * 3.5);
         mesh.setColorAt(i, tmpColor);
       }
     }
@@ -350,12 +356,13 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): SandevistanTr
 
       // Echo brightness: scaled from main ghost brightness.
       // Per-instance color carries pure R / pure B — echoMat{R,B} color is 0xffffff (neutral).
+      // Boosted 25% vs original to make RGB split visible at distance.
       const brightness = isFinale
-        ? THREE.MathUtils.lerp(0.7, 0.08, tGhost) * 0.5
-        : THREE.MathUtils.lerp(0.55, 0.05, tGhost) * 0.5;
+        ? THREE.MathUtils.lerp(1.0, 0.12, tGhost) * 0.6
+        : THREE.MathUtils.lerp(0.85, 0.08, tGhost) * 0.6;
 
-      const redColor = new THREE.Color(brightness * 2.0, 0, 0);
-      const blueColor = new THREE.Color(0, 0, brightness * 2.0);
+      const redColor = new THREE.Color(brightness * 2.5, 0, 0);
+      const blueColor = new THREE.Color(0, 0, brightness * 2.5);
       echoMeshR.setColorAt(i, redColor);
       echoMeshB.setColorAt(i, blueColor);
     }
@@ -366,7 +373,14 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): SandevistanTr
     if (echoMeshB.instanceColor) echoMeshB.instanceColor.needsUpdate = true;
   }
 
-  return { group, record, setMode, update, reset };
+  return {
+    group,
+    record,
+    setMode,
+    update,
+    reset,
+    get snapshotCount(): number { return snapshotOrder.length; }
+  };
 }
 
 // ---------------------------------------------------------------------------

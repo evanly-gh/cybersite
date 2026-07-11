@@ -667,14 +667,30 @@ function buildGhostGeometry(): THREE.BufferGeometry {
     parts.push({ geom, matrix, mat: 0 });
   };
 
-  // hoops (low-poly)
+  // Wheel hoops — rotated 90 degrees around the Y axis so the torus ring lies in
+  // the YZ plane (perpendicular to the bike's forward axis +X). This makes the
+  // wheels appear as circles when the camera looks from behind or in front
+  // (the typical finale chase angle). Without this rotation the default XY-plane
+  // torus renders as a thin sliver from the ±X directions.
+  // Keep radialSegments=4, tubularSegments=10 to stay within the 400-tri budget.
   for (const s of [1, -1]) {
-    add(new THREE.TorusGeometry(WHEEL_R, WHEEL_TUBE, 4, 10), xform(s * AXLE_X, AXLE_Y, 0));
+    add(
+      new THREE.TorusGeometry(WHEEL_R, WHEEL_TUBE, 4, 10),
+      xform(s * AXLE_X, AXLE_Y, 0, 0, Math.PI / 2, 0)
+    );
   }
-  // body spar
+
+  // Body spar: side-view profile extruded in Z (readable from the side).
   const shape = new THREE.Shape(PROFILE.map(([x, y]) => new THREE.Vector2(x, y)));
   add(new THREE.ExtrudeGeometry(shape, { depth: BODY_HALF_W * 2, bevelEnabled: false }), xform(0, 0, -BODY_HALF_W));
-  // rider silhouette in tuck: pelvis+torso, helmet, arm slabs, leg slabs
+
+  // Body volume box — gives the ghost a recognisable block mass from any cardinal
+  // angle, especially from behind (the finale chase-from-behind camera view).
+  // 12 triangles only; sits over the bike body profile centroid.
+  add(new THREE.BoxGeometry(1.8, 0.5, 0.22), xform(0.28, 0.76, 0));
+
+  // Rider silhouette in tuck: pelvis+torso, helmet, arm slabs, leg slabs.
+  // BoxGeometry and IcosahedronGeometry are inherently 3-D so they read from any angle.
   add(new THREE.BoxGeometry(0.3, 0.44, 0.32), xform(-0.06, 1.02, 0, 0, 0, -0.9));
   add(new THREE.IcosahedronGeometry(0.13, 0), xform(0.2, 1.24, 0));
   for (const s of [1, -1]) {

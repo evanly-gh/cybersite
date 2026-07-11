@@ -139,9 +139,24 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
   // Updatables list (populated by segments + FX wiring)
   const updatables: { update(t: number): void }[] = [];
 
+  // Reusable scratch objects for trail seeding (no per-call allocation)
+  const _seedMat = new THREE.Matrix4();
+  const _seedScale = new THREE.Vector3(1, 1, 1);
+
   // Wire sandevistan as an updatable (Pattern A: record then update, monotonic forward)
   updatables.push({
     update(t: number): void {
+      // Seed trail when under-populated (e.g. in ?shot= mode where setProgress is called
+      // only once, producing only a single snapshot). We replay bikePath.state() from 0→t
+      // in 80 steps so the ghost chain fills both ride (12 slots) and finale (24 slots).
+      if (t > 0.01 && sandevistan.snapshotCount < 12) {
+        for (let si = 0; si <= 80; si++) {
+          const tStep = (si / 80) * t;
+          const st = bikePath.state(tStep);
+          _seedMat.compose(st.pos, st.quat, _seedScale);
+          sandevistan.record(_seedMat, tStep);
+        }
+      }
       // Record current bike world matrix (must be called AFTER bike positioning in master)
       sandevistan.record(bikeAsset.group.matrixWorld, t);
       sandevistan.update(t);

@@ -100,6 +100,20 @@ registerAsset('sandevistan', (rng) => {
   group.add(trail.group);
   group.add(bikeGroup);
 
+  // Framing hint: an invisible mesh that encompasses the current bike position and
+  // the recent ghost trail extent (~20m behind). The viewer's Box3.setFromObject
+  // does not account for InstancedMesh instance matrices, so without this hint
+  // the camera frames only to the ghost geometry local bounds near origin.
+  // We update its position in update() to sit at the trail midpoint (10m behind bike).
+  // Size: 22m long (covers bike + 21m behind) × 3m tall × 6m wide.
+  const hintMat = new THREE.MeshBasicMaterial({ visible: false });
+  const framingHint = new THREE.Mesh(
+    new THREE.BoxGeometry(22, 3, 6),
+    hintMat
+  );
+  framingHint.name = 'framingHint';
+  group.add(framingHint);
+
   return {
     group,
     update: (t: number) => {
@@ -116,8 +130,15 @@ registerAsset('sandevistan', (rng) => {
       // Pose the actual bike at the current t position
       const currentU = t;
       const worldMat = bikeWorldMatrix(currentU);
-      bikeGroup.position.setFromMatrixPosition(worldMat);
+      const bikePos = new THREE.Vector3().setFromMatrixPosition(worldMat);
+      bikeGroup.position.copy(bikePos);
       bikeGroup.rotation.setFromRotationMatrix(worldMat);
+
+      // Position the framing hint at the bike's world position so the viewer's
+      // auto-framer (Box3.setFromObject) can frame the ghost trail.
+      // The hint box (22m long) centred on the bike straddles the full trail span.
+      framingHint.position.copy(bikePos);
+      framingHint.position.y = 0.8; // lift to vertical centre of trail
 
       // Pose the rider based on t (lean into turns, etc.)
       const angle = currentU * Math.PI * 2;
