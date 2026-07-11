@@ -736,7 +736,7 @@ export function buildBillboard(rng: Rng, o: BillboardOptions): Billboard {
     color: 0x000000,
     emissive: 0xffffff,
     emissiveMap: texture,
-    emissiveIntensity: 1.15,
+    emissiveIntensity: 0.95,
     roughness: 0.4,
     metalness: 0,
     side: screenRotY !== 0 ? THREE.DoubleSide : THREE.FrontSide

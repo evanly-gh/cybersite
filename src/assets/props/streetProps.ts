@@ -98,7 +98,7 @@ export function buildStreetLamp(rng: Rng): THREE.Group {
   // glowing lens underside
   glowP.push(boxPart(new THREE.Vector3(headX, headY - 0.05, 0), new THREE.Vector3(0.5, 0.1, 0.3)));
 
-  const glowMesh = mergeOne(glowP, makeGlowMat(COLORS.sodiumAmber, 3), 'lampGlow');
+  const glowMesh = mergeOne(glowP, makeGlowMat(COLORS.sodiumAmber, 2.0), 'lampGlow');
 
   // additive light cone under the head
   const coneH = headY - 0.1;
@@ -108,7 +108,7 @@ export function buildStreetLamp(rng: Rng): THREE.Group {
       map: shaftTex(COLORS.sodiumAmber),
       color: COLORS.sodiumAmber,
       transparent: true,
-      opacity: 0.16,
+      opacity: 0.10,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
       depthWrite: false
@@ -118,7 +118,7 @@ export function buildStreetLamp(rng: Rng): THREE.Group {
   cone.name = 'lightCone';
 
   // sidewalk pool decal
-  const pool = groundDecal(radialGlowTex(COLORS.sodiumAmber), 3.8);
+  const pool = groundDecal(radialGlowTex(COLORS.sodiumAmber), 3.8, 0.02, 0.7);
   pool.position.set(headX, 0.02, 0);
   pool.name = 'lampPool';
 
@@ -181,7 +181,7 @@ export function buildTrafficLight(rng: Rng): THREE.Group {
       color: 0x000000,
       emissive: 0xffffff,
       emissiveMap: makeWalkingManTex(rng),
-      emissiveIntensity: 1.8,
+      emissiveIntensity: 1.4,
       roughness: 0.9
     })
   );
@@ -293,7 +293,7 @@ export function buildVendingMachine(rng: Rng): THREE.Group {
       color: 0x000000,
       emissive: 0xffffff,
       emissiveMap: makeAd('portrait', rng),
-      emissiveIntensity: 2.0,
+      emissiveIntensity: 1.5,
       roughness: 0.9
     })
   );

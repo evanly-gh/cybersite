@@ -39,8 +39,8 @@ function headlightPoolTex(colorHex: number, width = 128, height = 128): THREE.Ca
   const g = (colorHex >> 8) & 0xff;
   const b = colorHex & 0xff;
 
-  grad.addColorStop(0, `rgba(${r},${g},${b},0.95)`);
-  grad.addColorStop(0.3, `rgba(${r},${g},${b},0.5)`);
+  grad.addColorStop(0, `rgba(${r},${g},${b},0.65)`);
+  grad.addColorStop(0.3, `rgba(${r},${g},${b},0.35)`);
   grad.addColorStop(0.7, `rgba(${r},${g},${b},0.15)`);
   grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
 
@@ -180,7 +180,7 @@ export function buildLightPools(vehicles: THREE.Object3D[]): LightPools {
     if (headAnchor) {
       if (isBike) {
         // Bike: stronger cyan 10×6 m cone
-        bikePool = makePoolQuad(10, 6, headTexBike);
+        bikePool = makePoolQuad(8, 5, headTexBike);
         bikePool.name = 'bikeHeadPool';
         group.add(bikePool);
       } else {

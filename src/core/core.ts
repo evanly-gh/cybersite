@@ -97,7 +97,7 @@ export function initCore(canvas: HTMLCanvasElement): Core {
   // is exactly the "resolution 1/2" tier-2 spec. For tier 1 (bloom res 1/4) we
   // re-invoke bloomPass.setSize() ourselves with half of the effective size so its
   // internal halving lands on a quarter of the real resolution.
-  const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.9, 0.6, 0.75);
+  const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.9, 0.6, 0.82);
   composer.addPass(bloomPass);
 
   const caVignettePass = new ShaderPass(CA_VIGNETTE_SHADER);
