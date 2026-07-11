@@ -305,29 +305,80 @@ function stripeBand(
   ctx.restore();
 }
 
-/** Shibuya scramble decal: two orthogonal crosswalks + an X of diagonal crosswalks, worn via rng speckle-erase. */
+/**
+ * Shibuya scramble decal: realistic top-down layout with 4 edge zebra crossings (one per
+ * road arm, set back near the plaza boundary) + 2 diagonal crossings going corner-to-corner,
+ * all with bare-asphalt gaps so the center reads as open intersection, not an asterisk.
+ *
+ * Coordinate system (after ctx.translate to canvas center):
+ *   canvas-X = world X (east-west, About street direction).
+ *   canvas-Y = world Z (north-south, boulevard direction).
+ *   plazaSize = 40 m; half = 20 m. scale = px/plazaSize pixels-per-metre.
+ *
+ * Layout (real Shibuya scramble reference):
+ *   - 4 straight zebra crossings, one per road arm, centred at ±edgeOffset from plaza centre.
+ *     Each crossing sits close to the plaza boundary (curb line), leaving a clear bare-asphalt
+ *     zone in the middle of the intersection between the crossing bands.
+ *   - 2 diagonal crossings (NW-SE and NE-SW) going corner-to-corner across the plaza.
+ *     These cross through the centre (correct for a scramble), with stripes perpendicular
+ *     to each diagonal direction — two distinct zebra bands, not a radiating asterisk.
+ */
 function makeCrossingTexture(rng: Rng, plazaSize: number): THREE.CanvasTexture {
   const px = 1024;
   const scale = px / plazaSize;
+
+  // Stripe proportions: ~0.5 m white + ~0.55 m gap (realistic zebra crosswalk).
+  const stripeW = 0.5 * scale;
+  const gapW = 0.55 * scale;
+
+  // Road half-width: STREET_WIDTH = 14 m, so full crossing spans 14 m across the road.
+  const roadHalf = (STREET_WIDTH / 2) * scale;
+
+  // Each straight crossing is centred at this offset from plaza centre (in metres).
+  // Plaza half = 20 m; edgeOffset = 14 m puts crosswalk centre at 70% of the way to edge,
+  // leaving clear bare asphalt between the diagonal crossing tips and the arm crossings.
+  const edgeOffset = 14;
+  const edgeOffPx = edgeOffset * scale;
+
+  // Crosswalk band depth: the painted stripe region is 3.5 m wide perpendicular to travel.
+  const cwDepth = 3.5 * scale;
+
+  // Diagonal crossing: stripes repeat across the road width (14 m) in local-X (after 45° rotate),
+  // and each stripe bar is cwDepth deep in local-Y (perpendicular to diagonal = pedestrian direction).
+  const diagSpan = STREET_WIDTH * scale;
+
   return makeCanvasTexture(px, px, (ctx) => {
     ctx.translate(px / 2, px / 2);
-    const stripeW = 1.1 * scale;
-    const gapW = 1.1 * scale;
 
-    // Orthogonal crossing over the boulevard (road runs along Z, pedestrians cross along X
-    // -> stripes repeat across X, each stripe elongated along Z).
-    stripeBand(ctx, -11 * scale, 0, 0, 16 * scale, 4 * scale, stripeW, gapW);
-    stripeBand(ctx, 11 * scale, 0, 0, 16 * scale, 4 * scale, stripeW, gapW);
-    // Orthogonal crossing over About street (road runs along X, pedestrians cross along Z
-    // -> stripes repeat across Z, each stripe elongated along X).
-    stripeBand(ctx, 0, -11 * scale, Math.PI / 2, 16 * scale, 4 * scale, stripeW, gapW);
-    stripeBand(ctx, 0, 11 * scale, Math.PI / 2, 16 * scale, 4 * scale, stripeW, gapW);
-    // Diagonal scramble X: stripes repeat along the diagonal, each stripe perpendicular to it.
-    stripeBand(ctx, 0, 0, Math.PI / 4, 30 * scale, 5.5 * scale, stripeW, gapW);
-    stripeBand(ctx, 0, 0, -Math.PI / 4, 30 * scale, 5.5 * scale, stripeW, gapW);
+    // --- 4 straight zebra crossings, one per road arm ---
+    //
+    // West crossing (crosses the N-S boulevard at the west edge of the plaza):
+    //   Pedestrians walk E-W (canvas-X). Stripes repeat across E-W = local-X at angle 0.
+    //   Each stripe bar is cwDepth tall in canvas-Y (N-S = along the road). Center at (-edgeOffset, 0).
+    stripeBand(ctx, -edgeOffPx, 0, 0, 2 * roadHalf, cwDepth, stripeW, gapW);
+
+    // East crossing:
+    stripeBand(ctx, edgeOffPx, 0, 0, 2 * roadHalf, cwDepth, stripeW, gapW);
+
+    // North crossing (crosses the E-W About street at the north edge of the plaza):
+    //   Pedestrians walk N-S (canvas-Y). Angle PI/2 rotates local-X onto canvas-Y.
+    //   Stripes repeat across N-S = local-X; each stripe elongated in canvas-X (E-W). Center at (0, -edgeOffset).
+    stripeBand(ctx, 0, -edgeOffPx, Math.PI / 2, 2 * roadHalf, cwDepth, stripeW, gapW);
+
+    // South crossing:
+    stripeBand(ctx, 0, edgeOffPx, Math.PI / 2, 2 * roadHalf, cwDepth, stripeW, gapW);
+
+    // --- 2 diagonal corner-to-corner crossings ---
+    //
+    // NW-SE diagonal (angle PI/4): local-X along NW-SE, local-Y along NE-SW.
+    //   Stripes repeat 14 m along the diagonal; each is cwDepth perpendicular. Center at (0,0).
+    stripeBand(ctx, 0, 0, Math.PI / 4, diagSpan, cwDepth, stripeW, gapW);
+
+    // NE-SW diagonal (angle -PI/4):
+    stripeBand(ctx, 0, 0, -Math.PI / 4, diagSpan, cwDepth, stripeW, gapW);
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    // Worn/faded edges: erase random speckles out of the paint.
+    // Worn/faded surface: erase random speckles out of the paint.
     ctx.globalCompositeOperation = 'destination-out';
     for (let i = 0; i < 900; i++) {
       ctx.fillStyle = `rgba(0,0,0,${rng.range(0.1, 0.55)})`;
