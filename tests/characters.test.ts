@@ -133,7 +133,11 @@ describe('buildCrowd', () => {
     const c = buildCrowd(makeRng(2), n, area);
     let mesh: THREE.InstancedMesh | undefined;
     c.group.traverse((o) => {
-      if ((o as THREE.InstancedMesh).isInstancedMesh) mesh = o as THREE.InstancedMesh;
+      // Find the main body mesh (named 'crowd') — the group may also contain
+      // a smaller accent-ring InstancedMesh, so match by name.
+      if ((o as THREE.InstancedMesh).isInstancedMesh && o.name === 'crowd') {
+        mesh = o as THREE.InstancedMesh;
+      }
     });
     expect(mesh).toBeDefined();
     expect(mesh!.count).toBe(n);
@@ -162,10 +166,14 @@ describe('buildCrowd', () => {
     let ma: THREE.InstancedMesh | undefined;
     let mb: THREE.InstancedMesh | undefined;
     a.group.traverse((o) => {
-      if ((o as THREE.InstancedMesh).isInstancedMesh) ma = o as THREE.InstancedMesh;
+      if ((o as THREE.InstancedMesh).isInstancedMesh && o.name === 'crowd') {
+        ma = o as THREE.InstancedMesh;
+      }
     });
     b.group.traverse((o) => {
-      if ((o as THREE.InstancedMesh).isInstancedMesh) mb = o as THREE.InstancedMesh;
+      if ((o as THREE.InstancedMesh).isInstancedMesh && o.name === 'crowd') {
+        mb = o as THREE.InstancedMesh;
+      }
     });
     const m1 = new THREE.Matrix4();
     const m2 = new THREE.Matrix4();

@@ -6,14 +6,14 @@ import { mergeParts, xform, type RigPart } from './rig';
 /**
  * Task 17 — stylized night-city pedestrians. Seen from a moving camera at
  * distance: no face detail, just a segmented-capsule silhouette + a hinted
- * visor band + (20% of the time) one neon accent. Forward = +X, up = +Y.
+ * visor band + (~35% of the time) one neon accent. Forward = +X, up = +Y.
  *
  * Rig: single SkinnedMesh, 11 rigid-bound bones (same technique as the
  * bike/rider in src/assets/vehicles/bike.ts — geometry authored directly in
  * absolute bind-pose coordinates, mesh.bind()'d while every bone quaternion is
  * still identity, then pose() reorients bones). 2 material groups (matte
  * street-tone body + a second "accent" material that is always the dark
- * visor band and, 20% of the time, also lights up a stripe/umbrella
+ * visor band/collar and, ~35% of the time, also lights up a stripe/umbrella
  * rim/phone-glow somewhere on the body) = 2 draw calls total.
  */
 
@@ -64,19 +64,21 @@ const B = {
 
 const M = { body: 0, accent: 1 } as const;
 
-// Muted street-tone body palette — all derived from theme.ts COLORS, mixed toward
-// each other rather than toward void, so silhouettes stay muted but still read
-// clearly against the night backdrop (round-1 iteration: the darkest mixes were
-// reading as near-black-on-black and disappearing).
+// Dark street-tone body palette — cyberpunk-dark, lean toward void/shadow-blue
+// so silhouettes read as night-city denizens. All moonlight mix <=0.25 so no
+// figure looks like a daytime civilian. A faint self-emissive lift keeps the
+// dark tones from vanishing to pure black at this scene exposure.
 function mutedTones(): THREE.Color[] {
   const mix = (a: number, b: number, t: number): THREE.Color =>
     new THREE.Color(a).lerp(new THREE.Color(b), t);
   return [
-    mix(COLORS.shadowBlue, COLORS.moonlight, 0.35), // steel blue-grey
-    mix(COLORS.nightHaze, COLORS.moonlight, 0.3), // muted plum-grey
-    mix(COLORS.moonlight, COLORS.shadowBlue, 0.45), // warm grey
-    mix(COLORS.sodiumAmber, COLORS.void, 0.55), // muted olive/brown
-    mix(COLORS.holoTeal, COLORS.shadowBlue, 0.4) // muted teal-grey
+    mix(COLORS.shadowBlue, COLORS.moonlight, 0.2),   // dark steel-blue
+    mix(COLORS.nightHaze, COLORS.shadowBlue, 0.3),   // deep plum — cyberpunk long coat
+    mix(COLORS.shadowBlue, COLORS.moonlight, 0.22),  // dark slate-grey
+    mix(COLORS.sodiumAmber, COLORS.void, 0.7),        // very dark olive/brown — weathered jacket
+    mix(COLORS.holoTeal, COLORS.void, 0.72),          // very dark teal (not bright cyan)
+    mix(COLORS.nightHaze, COLORS.void, 0.25),         // near-black plum
+    mix(COLORS.void, COLORS.shadowBlue, 0.6),         // darkest: void-blue charcoal
   ];
 }
 
@@ -91,17 +93,50 @@ interface BuiltParts {
 function buildBodyParts(rng: Rng, accentOn: boolean, accentKind: AccentKind, hoodUp: boolean, bagOn: boolean): BuiltParts {
   const p: RigPart[] = [];
 
-  // pelvis
+  // pelvis — slightly wider for coat silhouette
   p.push({ geom: new THREE.BoxGeometry(0.32, 0.26, 0.22), matrix: xform(0, HIPS_Y0 + 0.06, 0), mat: M.body, bone: B.hips });
-  // torso (capsule, waist to shoulders)
+
+  // jacket skirt / coat flare below hips — tapers outward slightly for that
+  // Blade Runner long-coat silhouette read at distance. Bound to hips so it
+  // moves with stride.
   p.push({
-    geom: new THREE.CapsuleGeometry(0.16, 0.3, 4, 8),
-    matrix: xform(0, SPINE_Y0 + 0.16, 0),
+    geom: new THREE.CylinderGeometry(0.19, 0.23, 0.22, 6, 1, true),
+    matrix: xform(0, HIPS_Y0 - 0.04, 0),
+    mat: M.body,
+    bone: B.hips
+  });
+
+  // torso — slightly wider than before to give coat-wearing bulk
+  p.push({
+    geom: new THREE.CapsuleGeometry(0.17, 0.28, 4, 8),
+    matrix: xform(0, SPINE_Y0 + 0.15, 0),
     mat: M.body,
     bone: B.spine
   });
+
+  // collar / neck band — always present, part of accent material;
+  // dark by default, becomes emissive when neon accent is active.
+  p.push({
+    geom: new THREE.CylinderGeometry(0.075, 0.08, 0.06, 8),
+    matrix: xform(0, HEAD_Y0 - 0.1, 0),
+    mat: M.accent,
+    bone: B.spine
+  });
+
+  // shoulder epaulettes — box caps that widen the silhouette and read as a
+  // structured jacket shoulder even at distance.
+  for (const s of [1, -1] as const) {
+    p.push({
+      geom: new THREE.BoxGeometry(0.09, 0.06, 0.19),
+      matrix: xform(0, SH_Y0 + 0.03, s * (SHOULDER_OUT + 0.06)),
+      mat: M.body,
+      bone: B.spine
+    });
+  }
+
   // head
   p.push({ geom: new THREE.SphereGeometry(0.115, 14, 10), matrix: xform(0, HEAD_Y0, 0), mat: M.body, bone: B.head });
+
   // hood-up variant: a soft shell over the head/shoulders
   if (hoodUp) {
     p.push({
@@ -111,6 +146,7 @@ function buildBodyParts(rng: Rng, accentOn: boolean, accentKind: AccentKind, hoo
       bone: B.head
     });
   }
+
   // visor band — always present, dark by default, glows if the phone/visor accent lands here
   p.push({
     geom: new THREE.BoxGeometry(0.15, 0.032, 0.03),
@@ -118,6 +154,7 @@ function buildBodyParts(rng: Rng, accentOn: boolean, accentKind: AccentKind, hoo
     mat: M.accent,
     bone: B.head
   });
+
   // backpack/bag
   if (bagOn) {
     p.push({
@@ -128,11 +165,17 @@ function buildBodyParts(rng: Rng, accentOn: boolean, accentKind: AccentKind, hoo
     });
   }
 
-  // jacket stripe accent (diagonal on chest)
+  // jacket stripe accent — bolder double stripe (racing stripe / techwear piping)
   if (accentOn && accentKind === 'stripe') {
     p.push({
-      geom: new THREE.BoxGeometry(0.03, 0.3, 0.012),
-      matrix: xform(0.155, SPINE_Y0 + 0.16, 0, 0, 0, 0.25),
+      geom: new THREE.BoxGeometry(0.035, 0.32, 0.014),
+      matrix: xform(0.16, SPINE_Y0 + 0.16, 0, 0, 0, 0.22),
+      mat: M.accent,
+      bone: B.spine
+    });
+    p.push({
+      geom: new THREE.BoxGeometry(0.018, 0.28, 0.014),
+      matrix: xform(0.16, SPINE_Y0 + 0.16, 0.055, 0, 0, 0.22),
       mat: M.accent,
       bone: B.spine
     });
@@ -199,7 +242,7 @@ function buildBodyParts(rng: Rng, accentOn: boolean, accentKind: AccentKind, hoo
 
   // phone glow quad — held up near the face (bound to head so it reads correctly
   // at any arm angle; this is the "looking at phone" stand-pose behavior AND
-  // the general 20% "holo-phone glow" accent share the same geometry).
+  // the general ~35% "holo-phone glow" accent share the same geometry).
   const phoneOn = accentOn && accentKind === 'phone';
 
   for (const [th, ca, s] of [
@@ -263,7 +306,8 @@ function axisY(bone: THREE.Bone, angle: number): void {
 export function buildPerson(rng: Rng, pose: PersonPose): PersonAsset {
   const tones = mutedTones();
   const bodyColor = rng.pick(tones);
-  const accentOn = rng.chance(0.2);
+  // ~35% of people get a neon accent — sparse bright punctuation against dark bodies
+  const accentOn = rng.chance(0.35);
   const accentKind = rng.pick(['stripe', 'umbrella', 'phone'] as const);
   const hoodUp = rng.chance(0.25);
   const bagOn = rng.chance(0.35);
@@ -284,19 +328,20 @@ export function buildPerson(rng: Rng, pose: PersonPose): PersonAsset {
   const accentNeon = rng.pick(NEON_ACCENTS);
   const bodyMat = new THREE.MeshStandardMaterial({
     color: bodyColor,
-    roughness: 0.85,
-    metalness: 0.05,
+    roughness: 0.88,
+    metalness: 0.04,
     // faint self-emissive lift — reads as ambient neon bounce off wet streets,
-    // and keeps the muted palette from vanishing to pure black at this exposure.
+    // and keeps the dark palette from vanishing to pure black at this exposure.
     emissive: bodyColor,
-    emissiveIntensity: 0.12
+    emissiveIntensity: 0.1
   });
   const accentActive = accentOn || hasPhoneGlow;
   const accentColor = new THREE.Color(accentActive ? accentNeon : 0x02040a);
   const accentMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(0x02040a),
     emissive: accentColor,
-    emissiveIntensity: accentActive ? 1.3 : 0.04
+    // intensity 2.2 → bloom-amplified: reads as a proper glowing neon stripe/collar
+    emissiveIntensity: accentActive ? 2.2 : 0.04
   });
 
   const bones = makeBones();
@@ -385,12 +430,12 @@ export function buildPerson(rng: Rng, pose: PersonPose): PersonAsset {
       axisY(bones[B.spine], Math.sin(sec * 0.6) * 0.05);
       bones[B.hips].position.z = baseHipZ + Math.sin(sec * 0.3) * 0.01;
       if (hasPhoneGlow) {
-        accentMat.emissiveIntensity = 1.0 + Math.sin(sec * 3.2) * 0.3;
+        accentMat.emissiveIntensity = 1.8 + Math.sin(sec * 3.2) * 0.4;
       }
     } else {
       axisZ(bones[B.spine], -0.12 + Math.sin(sec * 0.5) * 0.01);
       if (hasPhoneGlow) {
-        accentMat.emissiveIntensity = 1.0 + Math.sin(sec * 3.2) * 0.3;
+        accentMat.emissiveIntensity = 1.8 + Math.sin(sec * 3.2) * 0.4;
       }
     }
     group.updateMatrixWorld(true);
@@ -408,23 +453,67 @@ export interface CrowdAsset {
   updateAmbient(sec: number): void;
 }
 
-/** One low-detail figure: a tapered body "blob" + head, merged into a single geometry. */
+/**
+ * One low-detail crowd figure: a tapered coat body + head, giving a wider-
+ * shoulder silhouette that reads as a person in a long coat rather than a
+ * gray domino. Two parts only — merged into a single geometry for instancing.
+ */
 function buildLowPolyFigureGeometry(): THREE.BufferGeometry {
   const parts: RigPart[] = [
-    { geom: new THREE.CapsuleGeometry(0.22, 1.0, 3, 6), matrix: xform(0, 0.85, 0), mat: 0 },
+    // torso — slightly cone-shaped (wider at shoulders) for coat silhouette
+    { geom: new THREE.CylinderGeometry(0.18, 0.14, 1.1, 6), matrix: xform(0, 0.85, 0), mat: 0 },
+    // head
     { geom: new THREE.SphereGeometry(0.13, 8, 6), matrix: xform(0, 1.5, 0), mat: 0 }
   ];
   return mergeParts(parts, false);
 }
 
+/**
+ * Accent collar-ring geometry — a thin torus at neck height on ~30% of crowd
+ * figures. Reads as a glowing collar band even at crowd distance.
+ * Second InstancedMesh, constant 1 draw call regardless of n.
+ */
+function buildAccentRingGeometry(): THREE.BufferGeometry {
+  // Torus: R=0.14 (collar radius), r=0.025 (tube) — readable at crowd distance, blooms well
+  return new THREE.TorusGeometry(0.14, 0.025, 5, 10);
+}
+
 export function buildCrowd(rng: Rng, n: number, area: [number, number]): CrowdAsset {
   const [w, d] = area;
-  const geom = buildLowPolyFigureGeometry();
-  const mat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0.02 });
-  const mesh = new THREE.InstancedMesh(geom, mat, Math.max(n, 1));
-  mesh.name = 'crowd';
-  mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(n, 1) * 3), 3);
-  mesh.frustumCulled = false;
+  const figureGeom = buildLowPolyFigureGeometry();
+  const accentGeom = buildAccentRingGeometry();
+
+  // Dark body material — lean toward shadow-blue/void (cyberpunk night crowd)
+  const bodyMat = new THREE.MeshStandardMaterial({
+    roughness: 0.92,
+    metalness: 0.02,
+    emissiveIntensity: 0.08
+  });
+
+  // Neon accent material — instanceColor drives hue, emissive carries the bloom glow.
+  const accentMat = new THREE.MeshStandardMaterial({
+    color: 0x000000,
+    emissive: new THREE.Color(1, 1, 1),
+    emissiveIntensity: 2.8,
+    roughness: 0.1,
+    metalness: 0.0
+  });
+
+  const bodyMesh = new THREE.InstancedMesh(figureGeom, bodyMat, Math.max(n, 1));
+  bodyMesh.name = 'crowd';
+  bodyMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(n, 1) * 3), 3);
+  bodyMesh.frustumCulled = false;
+
+  // Collect which figures get accent collar rings — ~30% of the crowd
+  const accentIndices: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (rng.chance(0.3)) accentIndices.push(i);
+  }
+  const nAccents = Math.max(accentIndices.length, 1);
+  const accentMesh = new THREE.InstancedMesh(accentGeom, accentMat, nAccents);
+  accentMesh.name = 'crowdAccents';
+  accentMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(nAccents * 3), 3);
+  accentMesh.frustumCulled = false;
 
   const tones = mutedTones();
   const phases: number[] = [];
@@ -432,6 +521,9 @@ export function buildCrowd(rng: Rng, n: number, area: [number, number]): CrowdAs
   const rotations: number[] = [];
   const scales: number[] = [];
   const dummy = new THREE.Object3D();
+
+  const figureXYZs: THREE.Vector3[] = [];
+  const figureScales: number[] = [];
 
   for (let i = 0; i < n; i++) {
     const x = rng.range(-w / 2, w / 2);
@@ -446,15 +538,47 @@ export function buildCrowd(rng: Rng, n: number, area: [number, number]): CrowdAs
     rotations.push(ry);
     scales.push(scale);
     phases.push(rng.range(0, Math.PI * 2));
-    mesh.setMatrixAt(i, dummy.matrix);
-    mesh.setColorAt(i, rng.pick(tones));
+    bodyMesh.setMatrixAt(i, dummy.matrix);
+    bodyMesh.setColorAt(i, rng.pick(tones));
+    figureXYZs.push(new THREE.Vector3(x, 0, z));
+    figureScales.push(scale);
   }
-  mesh.instanceMatrix.needsUpdate = true;
-  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  bodyMesh.instanceMatrix.needsUpdate = true;
+  if (bodyMesh.instanceColor) bodyMesh.instanceColor.needsUpdate = true;
+
+  // Place accent collar rings at neck-height (~1.35 m * scale) for the lit subset.
+  // The torus lies flat (X-Z plane), forming a horizontal glowing ring at the collar.
+  const NEON_CROWD = [
+    new THREE.Color(COLORS.signalMagenta),
+    new THREE.Color(COLORS.sodiumAmber),
+    new THREE.Color(COLORS.holoTeal)
+  ];
+  for (let ai = 0; ai < accentIndices.length; ai++) {
+    const fi = accentIndices[ai];
+    const fx = figureXYZs[fi].x;
+    const fz = figureXYZs[fi].z;
+    const sc = figureScales[fi];
+    dummy.position.set(fx, 1.35 * sc, fz);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.set(sc, sc, sc);
+    dummy.updateMatrix();
+    accentMesh.setMatrixAt(ai, dummy.matrix);
+    accentMesh.setColorAt(ai, rng.pick(NEON_CROWD));
+  }
+  // If no accents were chosen, push the single dummy instance off-screen
+  if (accentIndices.length === 0) {
+    dummy.position.set(0, -100, 0);
+    dummy.updateMatrix();
+    accentMesh.setMatrixAt(0, dummy.matrix);
+    accentMesh.setColorAt(0, new THREE.Color(0, 0, 0));
+  }
+  accentMesh.instanceMatrix.needsUpdate = true;
+  if (accentMesh.instanceColor) accentMesh.instanceColor.needsUpdate = true;
 
   const group = new THREE.Group();
   group.name = 'buildCrowd';
-  group.add(mesh);
+  group.add(bodyMesh);
+  group.add(accentMesh);
 
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
@@ -469,9 +593,23 @@ export function buildCrowd(rng: Rng, n: number, area: [number, number]): CrowdAs
       const sway = Math.sin(sec * 1.4 + phases[i]) * 0.03;
       euler.set(0, rotations[i] + sway, 0);
       m.compose(v, new THREE.Quaternion().setFromEuler(euler), s);
-      mesh.setMatrixAt(i, m);
+      bodyMesh.setMatrixAt(i, m);
     }
-    mesh.instanceMatrix.needsUpdate = true;
+    bodyMesh.instanceMatrix.needsUpdate = true;
+    // Accent rings follow the body figures
+    for (let ai = 0; ai < accentIndices.length; ai++) {
+      const fi = accentIndices[ai];
+      const fx = figureXYZs[fi].x;
+      const fz = figureXYZs[fi].z;
+      const sc = figureScales[fi];
+      const sway = Math.sin(sec * 1.4 + phases[fi]) * 0.03;
+      dummy.position.set(fx, 1.35 * sc, fz);
+      dummy.rotation.set(0, rotations[fi] + sway, 0);
+      dummy.scale.set(sc, sc, sc);
+      dummy.updateMatrix();
+      accentMesh.setMatrixAt(ai, dummy.matrix);
+    }
+    if (accentIndices.length > 0) accentMesh.instanceMatrix.needsUpdate = true;
   }
 
   return { group, updateAmbient };
