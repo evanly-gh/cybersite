@@ -177,7 +177,24 @@ const LANDMARK_FOOTPRINT: Record<LandmarkKind, [number, number]> = {
 };
 
 const GAP = 6;
-const SIDEWALK_SETBACK = 11; // building near-edge distance from street centerline
+const SIDEWALK_SETBACK = 11; // building near-edge distance from street centerline (front/wall zones)
+
+// Per-zone setbacks for the "back" zones whose buildings sit on the CAMERA's side of the
+// street for About and Projects sections.  These must be large enough that no building's
+// footprint intrudes into the camera position or its sightline to the opposite wall.
+//
+// About: fixed camera at z=+26 looks across to aboutWall at z=-11.5.  The corridor from
+//   z=-11.5 to z=+26 must be clear.  aboutBack near-edge is pushed to z=ABOUT_BACK_SETBACK
+//   (32) so the entire corridor is unobstructed.  Deepest filler (parking d=22) then extends
+//   to z=54, well behind the camera.
+//
+// Boulevard (projects back): fixed cameras at x=205 and x≈204 look across to projectsWall
+//   at x≈251.5.  The sightline from x=205 to x=252 must be clear.  boulevard near-edge is
+//   pushed to BLVD_X - BLVD_BACK_SETBACK = 240-44 = 196, so x=196..174 (parking) are all
+//   west of the camera.  The strip from x=196 to x=229 (old setback) is left as open lot /
+//   wide sidewalk — common in cyberpunk dense-block districts adjacent to ramp lanes.
+const ABOUT_BACK_SETBACK = 32;  // aboutBack near-edge at z=+32; camera at z=+26 is clear
+const BLVD_BACK_SETBACK  = 44;  // boulevard near-edge at x=196; camera at x=205 is clear
 
 // Route-derived corridor extents (kept in lockstep with world/streets.ts constants by
 // comment, not import, since streets.ts doesn't export its internal PLAZA_SIZE/ABOUT_LEN).
@@ -341,14 +358,18 @@ export function computeCityLayout(seed: number): CityLayoutData {
   // Venues clustered near the About-street midpoint.
   const aboutMid = (ABOUT_X0 + ABOUT_X1) / 2;
   addLandmark('restaurant', aboutMid - 10, -SIDEWALK_SETBACK, Math.PI / 2, 'aboutWall', 'restaurant');
-  addLandmark('ramen', aboutMid + 20, SIDEWALK_SETBACK, -Math.PI / 2, 'aboutBack', 'ramen0');
-  addLandmark('bar', aboutMid - 40, SIDEWALK_SETBACK, -Math.PI / 2, 'aboutBack', 'bar');
+  addLandmark('ramen', aboutMid + 20, ABOUT_BACK_SETBACK, -Math.PI / 2, 'aboutBack', 'ramen0');
+  addLandmark('bar', aboutMid - 40, ABOUT_BACK_SETBACK, -Math.PI / 2, 'aboutBack', 'bar');
   // Ramen repeat near the gas station on the boulevard.
-  addLandmark('ramen', 200, -235, Math.PI, 'projectsBack', 'ramen1');
+  // Placed at x=183 (well within the BLVD_BACK_SETBACK=44 back zone, x≤196) so it
+  // does not intrude into the camera corridor (camera at x=205).
+  addLandmark('ramen', 183, -235, Math.PI, 'projectsBack', 'ramen1');
 
   buildings.push(...landmarkSlots);
 
-  const gasStation = { x: 215, z: -240 };
+  // Gas station moved to x=183 (inside BLVD_BACK_SETBACK zone) so it does not
+  // intrude into the camera corridor (cameras at x≈205 look across boulevard to x≈251.5).
+  const gasStation = { x: 183, z: -240 };
   reserved.push({ x: gasStation.x, z: gasStation.z, w: 22, d: 16, zone: 'boulevard' });
 
   cranes.push({ x: 300, z: -140, swinging: true }, { x: 170, z: -520, swinging: false });
@@ -357,11 +378,16 @@ export function computeCityLayout(seed: number): CityLayoutData {
 
   // Reserve the 4 Shibuya corner footprints up front (computed below, but geometry is
   // fixed) so the boulevard fill routes around them instead of clipping into the plaza.
+  //
+  // The two +z corners (at z=+30) are moved outward to z=+45 to clear the drift-segment
+  // camera at (265,5,38): with corners at z=30 the footprint (d=9 → z=25.5..34.5) falls
+  // across the camera's sightline from z=38 to z≈-5.  At z=45 the footprint spans
+  // z=40.5..49.5, safely behind the camera.
   const cxEarly = WAYPOINTS.shibuyaCenter.x;
   const cornersEarly: Array<[number, number, FillerKind]> = [
-    [cxEarly + 30, 30, 'officeHolo'],
+    [cxEarly + 30, 45, 'officeHolo'],  // +z pair moved from z=30 to z=45 (clears drift camera)
     [cxEarly + 30, -30, 'storefrontRow'],
-    [cxEarly - 30, 30, 'storefrontRow'],
+    [cxEarly - 30, 45, 'storefrontRow'],  // +z pair moved from z=30 to z=45
     [cxEarly - 30, -30, 'officeHolo']
   ];
   for (const [x, z, kind] of cornersEarly) {
@@ -407,20 +433,25 @@ export function computeCityLayout(seed: number): CityLayoutData {
   ];
 
   fillWall(rng, 'x', ABOUT_X0, ABOUT_X1, -SIDEWALK_SETBACK, -1, 'aboutWall', aboutWallWeights, reserved, { blocks, buildings }, 'aboutWall');
-  fillWall(rng, 'x', ABOUT_X0, ABOUT_X1, SIDEWALK_SETBACK, 1, 'aboutBack', aboutBackWeights, reserved, { blocks, buildings }, 'aboutBack');
+  // aboutBack: use ABOUT_BACK_SETBACK (32) so buildings start at z=+32, clearing the
+  // fixed About camera at z=+26 (and its sightline to aboutWall at z=-11.5).
+  fillWall(rng, 'x', ABOUT_X0, ABOUT_X1, ABOUT_BACK_SETBACK, 1, 'aboutBack', aboutBackWeights, reserved, { blocks, buildings }, 'aboutBack');
   fillWall(rng, 'z', BLVD_Z0, BLVD_Z1 + 24, BLVD_X + SIDEWALK_SETBACK, 1, 'projectsWall', projectsWallWeights, reserved, { blocks, buildings }, 'projectsWall');
-  fillWall(rng, 'z', BLVD_Z0, BLVD_Z1 + 24, BLVD_X - SIDEWALK_SETBACK, -1, 'boulevard', projectsBackWeights, reserved, { blocks, buildings }, 'projectsBack');
+  // boulevard back: use BLVD_BACK_SETBACK (44) so buildings start at x=196, clearing the
+  // fixed Projects cameras at x=205 (sightline to projectsWall at x≈251.5).
+  fillWall(rng, 'z', BLVD_Z0, BLVD_Z1 + 24, BLVD_X - BLVD_BACK_SETBACK, -1, 'boulevard', projectsBackWeights, reserved, { blocks, buildings }, 'projectsBack');
   // Skyway flank: sparse, both sides, larger pitch (footprints already sized ~34-40, gap x2).
   // Starts 12m past BLVD_Z1 (seam buffer, matching the boulevard fill's early stop above).
   fillWall(rng, 'z', SKYWAY_Z0 - 24, SKYWAY_Z1, BLVD_X + SIDEWALK_SETBACK, 1, 'skywayFlank', skywayWeights, reserved, { blocks, buildings }, 'skyR');
   fillWall(rng, 'z', SKYWAY_Z0 - 24, SKYWAY_Z1, BLVD_X - SIDEWALK_SETBACK, -1, 'skywayFlank', skywayWeights, reserved, { blocks, buildings }, 'skyL');
 
   // --- Shibuya corners: office w/ mega billboard + storefront row, alternating ---
+  // +z corners match their reserved positions (z=45, moved from 30 to clear drift camera).
   const cx = cxEarly;
   const corners: Array<[number, number, number, FillerKind]> = [
-    [cxEarly + 30, 30, Math.PI + Math.PI / 4, 'officeHolo'],
+    [cxEarly + 30, 45, Math.PI + Math.PI / 4, 'officeHolo'],   // z=45 (was 30)
     [cxEarly + 30, -30, Math.PI / 2 + Math.PI / 4, 'storefrontRow'],
-    [cxEarly - 30, 30, -Math.PI / 4, 'storefrontRow'],
+    [cxEarly - 30, 45, -Math.PI / 4, 'storefrontRow'],          // z=45 (was 30)
     [cxEarly - 30, -30, Math.PI / 4, 'officeHolo']
   ];
   corners.forEach(([x, z, rotY, kind], i) => {
