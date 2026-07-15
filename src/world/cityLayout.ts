@@ -202,9 +202,9 @@ const ABOUT_X0 = -296;
 const ABOUT_X1 = 210; // stop short of the Shibuya plaza (plaza half-size 20 @ x=240)
 const BLVD_X = WAYPOINTS.shibuyaCenter.x; // 240
 const BLVD_Z0 = -24; // just south of the plaza
-const BLVD_Z1 = WAYPOINTS.skywayStart.z; // -420
+const BLVD_Z1 = WAYPOINTS.researchEntry.z; // -420
 const SKYWAY_Z0 = BLVD_Z1;
-const SKYWAY_Z1 = WAYPOINTS.skywayEnd.z; // -800
+const SKYWAY_Z1 = WAYPOINTS.researchEnd.z; // -800
 
 function rectsOverlap(a: { x: number; z: number; w: number; d: number }, b: { x: number; z: number; w: number; d: number }): boolean {
   return Math.abs(a.x - b.x) * 2 < a.w + b.w && Math.abs(a.z - b.z) * 2 < a.d + b.d;

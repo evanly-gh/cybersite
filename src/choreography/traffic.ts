@@ -252,9 +252,9 @@ export function buildTraffic(rng: Rng): TrafficSystem {
   const uAboutStart  = ROUTE_U.aboutStart;
   const uAboutEnd    = ROUTE_U.shibuyaCenter;
   const uBlvdStart   = ROUTE_U.driftExit;
-  const uBlvdEnd     = ROUTE_U.skywayStart;
-  const uSkywayStart = ROUTE_U.skywayStart;
-  const uSkywayEnd   = ROUTE_U.skywayEnd;
+  const uBlvdEnd     = ROUTE_U.researchEntry;
+  const uSkywayStart = ROUTE_U.researchEntry;
+  const uSkywayEnd   = ROUTE_U.researchEnd;
   const uBridgeStart = ROUTE_U.bridgeStart;
   const uBridgeEnd   = ROUTE_U.bridgeEnd;
 

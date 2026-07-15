@@ -259,13 +259,13 @@ export function registerFinaleSegment(opts: FinaleSegmentOptions): FinaleSegment
 
   // ---- Step 1: Speed keys ----
   // Research segment ended at:
-  //   { t:0.79, u: ROUTE_U.skywayStart + 0.65*(ROUTE_U.skywayEnd - ROUTE_U.skywayStart) }
+  //   { t:0.79, u: ROUTE_U.researchEntry + 0.65*(ROUTE_U.researchEnd - ROUTE_U.researchEntry) }
   // We share that boundary t=0.79.
-  // Finale: continuous acceleration from skywayEnd area to bridgeEnd.
+  // Finale: continuous acceleration from researchEnd area to bridgeEnd.
   // u-rate ramps ×2.5: we achieve this with 3 keys creating a steeper slope toward t=1.0.
   //
   // uAt79: must match research segment's last u exactly.
-  const uAt79 = ROUTE_U.skywayStart + 0.65 * (ROUTE_U.skywayEnd - ROUTE_U.skywayStart);
+  const uAt79 = ROUTE_U.researchEntry + 0.65 * (ROUTE_U.researchEnd - ROUTE_U.researchEntry);
   // uAt100: bridgeEnd — where the bike reaches by the end of the scroll
   const uAt100 = ROUTE_U.bridgeEnd;
 

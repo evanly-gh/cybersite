@@ -328,9 +328,9 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
 
   // ---- Step 1: Speed keys ----
   // Gentle constant u-rate through t 0.62–0.79.
-  // Projects ended with { t:0.62, u: ROUTE_U.skywayStart }; we share that boundary.
-  const uStart = ROUTE_U.skywayStart;
-  const uEnd   = ROUTE_U.skywayEnd;
+  // Projects ended with { t:0.62, u: ROUTE_U.researchEntry }; we share that boundary.
+  const uStart = ROUTE_U.researchEntry;
+  const uEnd   = ROUTE_U.researchEnd;
   // 65% of skyway span by t=0.79 (unhurried, leaves headroom for finale)
   const uAt79  = uStart + 0.65 * (uEnd - uStart);
 

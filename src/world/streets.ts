@@ -549,9 +549,9 @@ function buildBoulevard(): { road: GeometryPart[]; curb: GeometryPart[]; marking
   // left a 10m hole in the drivable surface between the plaza and the first road segment.
   // Exact abutment at z = -20 (no overlap), so there's no double-stacked z-fight either.
   const zTop = -PLAZA_SIZE / 2;
-  const zBottom = WAYPOINTS.skywayStart.z; // -420
+  const zBottom = WAYPOINTS.researchEntry.z; // -420
 
-  // Flat segments between plaza edge / ramp1 / ramp2 / skywayStart, skipping the wedge + gap zones.
+  // Flat segments between plaza edge / ramp1 / ramp2 / researchEntry, skipping the wedge + gap zones.
   const segments: Array<[number, number]> = [
     [zTop, RAMPS[0].base.z],
     [RAMPS[0].land.z - RAMP_LEN, RAMPS[1].base.z],
@@ -604,68 +604,185 @@ function buildBoulevard(): { road: GeometryPart[]; curb: GeometryPart[]; marking
 const PLAZA_SIZE = 40;
 
 function buildShibuya(materials: Materials): { road: GeometryPart[]; curb: GeometryPart[]; crossing: THREE.Mesh } {
+  const cx = WAYPOINTS.shibuyaCenter.x;
+
   const road = [
     boxPart(
-      new THREE.Vector3(WAYPOINTS.shibuyaCenter.x, -0.08, 0),
+      new THREE.Vector3(cx, -0.08, 0),
       new THREE.Vector3(PLAZA_SIZE, 0.2, PLAZA_SIZE)
     )
   ];
 
+  // Real Shibuya layout: traffic refuge islands at the 4 corners (where pedestrians wait),
+  // each set back ~11.5m from center. These are raised concrete islands with rounded corners,
+  // shorter than the full half-plaza width so the zebra crossing bands can reach each arm.
+  // Real reference: islands are roughly 7×7m squares at the 4 corners of the intersection.
   const bulbSize = 7;
   const bulbOffset = 11.5;
   const curb: GeometryPart[] = [];
+
+  // Corner refuge islands
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
       curb.push(
         boxPart(
-          new THREE.Vector3(WAYPOINTS.shibuyaCenter.x + sx * bulbOffset, CURB_H / 2, sz * bulbOffset),
+          new THREE.Vector3(cx + sx * bulbOffset, CURB_H / 2, sz * bulbOffset),
           new THREE.Vector3(bulbSize, CURB_H, bulbSize)
+        )
+      );
+      // Small raised nose/bump at the curb edge facing the crossing (traffic bollard bump)
+      curb.push(
+        boxPart(
+          new THREE.Vector3(cx + sx * (bulbOffset - bulbSize * 0.5 * sx), CURB_H, sz * (bulbOffset - 1.5)),
+          new THREE.Vector3(0.6, CURB_H * 2, 2.5)
         )
       );
     }
   }
 
+  // Pedestrian wait zones: short flush pads where people gather on the plaza arms
+  // (between the corner islands, at the road edges)
+  const waitPadW = 3.5;
+  const waitPadOffset = PLAZA_SIZE / 2 - waitPadW / 2;
+  for (const side of [-1, 1]) {
+    // North/South arm wait pads (on the About-street edges)
+    curb.push(
+      boxPart(
+        new THREE.Vector3(cx, CURB_H / 2, side * waitPadOffset),
+        new THREE.Vector3(STREET_WIDTH - 1, CURB_H, waitPadW)
+      )
+    );
+    // East/West arm wait pads (on the boulevard edges)
+    curb.push(
+      boxPart(
+        new THREE.Vector3(cx + side * waitPadOffset, CURB_H / 2, 0),
+        new THREE.Vector3(waitPadW, CURB_H, STREET_WIDTH - 1)
+      )
+    );
+  }
+
   const decalGeom = new THREE.PlaneGeometry(PLAZA_SIZE, PLAZA_SIZE);
   decalGeom.rotateX(-Math.PI / 2);
   const crossing = new THREE.Mesh(decalGeom, materials.crossing);
-  crossing.position.set(WAYPOINTS.shibuyaCenter.x, 0.03, 0);
+  crossing.position.set(cx, 0.03, 0);
 
   return { road, curb, crossing };
 }
 
 // ---------------------------------------------------------------------------------
-// Skyway (elevated, curved) + connector + bridge
+// Research canyon (ground-level, z -420 to -800) + bridge-approach ramp + bridge
 // ---------------------------------------------------------------------------------
 
-const SKYWAY_HALF_W = 5; // 10 wide
 const BRIDGE_HALF_W = 6; // 12 wide
 const DECK_THICKNESS = 0.6;
 const RAIL_H = 1.1;
 const TOWER_HEIGHT = 40;
+const CANYON_WALL_H = 24; // tall concrete canyon walls flanking the research road
+const CANYON_WALL_SETBACK = 2.5; // gap between road edge and canyon wall inner face
 
-function buildSkyway(): {
+/**
+ * Ground-level research canyon: a straight flat road section (y=0) from researchEntry to
+ * researchEnd, flanked by tall concrete canyon walls. A low camera riding through here
+ * looks up at the walls and cityscape above. No pylons, no rails — the walls read as a
+ * natural canyon cut through the city block.
+ *
+ * Teal accent strips run along the base of both walls (not cyan — cyan is reserved for
+ * the bridge edge lights). Canyon length = 380m (z -420 to -800).
+ */
+function buildResearchCanyon(): {
+  road: GeometryPart[];
+  curb: GeometryPart[];
+  marking: GeometryPart[];
+  teal: GeometryPart[];
+  reflector: GeometryPart[];
+} {
+  const zEntry = WAYPOINTS.researchEntry.z; // -420
+  const zEnd   = WAYPOINTS.researchEnd.z;   // -800
+  const canyonLen = Math.abs(zEnd - zEntry); // 380
+  const centerZ = (zEntry + zEnd) / 2;
+
+  // Road surface
+  const road: GeometryPart[] = [
+    flatRoadPart(BLVD_X, centerZ, STREET_WIDTH, canyonLen)
+  ];
+
+  // Canyon walls: tall concrete slabs running the full length on ±X sides of the road.
+  // Road occupies [BLVD_X - HALF_STREET, BLVD_X + HALF_STREET] = [233, 247].
+  // Setback leaves a narrow ledge between road edge and wall inner face.
+  // wallInnerFace = HALF_STREET + CANYON_WALL_SETBACK = 9.5 from road center.
+  // wallCenterOffset = wallInnerFace + wallThick/2.
+  const wallThick = 4;
+  const wallInnerFace = HALF_STREET + CANYON_WALL_SETBACK; // 9.5 from road center (x=240)
+  const wallCenterOffset = wallInnerFace + wallThick / 2; // 11.5 from road center
+  const curb: GeometryPart[] = [
+    // West canyon wall (negative X side)
+    boxPart(
+      new THREE.Vector3(BLVD_X - wallCenterOffset, CANYON_WALL_H / 2, centerZ),
+      new THREE.Vector3(wallThick, CANYON_WALL_H, canyonLen)
+    ),
+    // East canyon wall (positive X side)
+    boxPart(
+      new THREE.Vector3(BLVD_X + wallCenterOffset, CANYON_WALL_H / 2, centerZ),
+      new THREE.Vector3(wallThick, CANYON_WALL_H, canyonLen)
+    ),
+    // Low curb strips at road edge
+    boxPart(
+      new THREE.Vector3(BLVD_X + SIDEWALK_OFFSET, CURB_H / 2, centerZ),
+      new THREE.Vector3(SIDEWALK_W, CURB_H, canyonLen)
+    ),
+    boxPart(
+      new THREE.Vector3(BLVD_X - SIDEWALK_OFFSET, CURB_H / 2, centerZ),
+      new THREE.Vector3(SIDEWALK_W, CURB_H, canyonLen)
+    )
+  ];
+
+  // Lane markings
+  const marking: GeometryPart[] = [
+    solidAlongZ(BLVD_X + HALF_STREET - 0.15, zEntry, zEnd),
+    solidAlongZ(BLVD_X - HALF_STREET + 0.15, zEntry, zEnd),
+    solidAlongZ(BLVD_X, zEntry, zEnd),
+    ...dashesAlongZ(BLVD_X + HALF_STREET / 2, zEntry, zEnd),
+    ...dashesAlongZ(BLVD_X - HALF_STREET / 2, zEntry, zEnd)
+  ];
+
+  // Teal accent strips along the base of both canyon walls (holoTeal, NOT tronCyan —
+  // cyan is reserved for the bridge/biker only; teal gives the canyon a cooler,
+  // deep-city glow reading against the concrete).
+  const teal: GeometryPart[] = [];
+  for (const side of [-1, 1]) {
+    const wx = BLVD_X + side * (HALF_STREET + CANYON_WALL_SETBACK);
+    teal.push(
+      boxPart(
+        new THREE.Vector3(wx, 0.08, centerZ),
+        new THREE.Vector3(0.18, 0.12, canyonLen)
+      )
+    );
+  }
+
+  // Cat-eye reflectors down lane centers
+  const reflector: GeometryPart[] = [];
+  for (let z = zEntry - 6; z > zEnd + 6; z -= 12) {
+    reflector.push(reflectorDot(BLVD_X + HALF_STREET / 2, z));
+    reflector.push(reflectorDot(BLVD_X - HALF_STREET / 2, z));
+  }
+
+  return { road, curb, marking, teal, reflector };
+}
+
+/**
+ * Bridge-approach ramp: a short deck section that climbs from ground level (y=0 at
+ * researchEnd, z=-800) through bridgeApproach (y=3, z=-835) to bridgeStart (y=14, z=-860).
+ * Follows the route curve so it matches the actual spline shape.
+ */
+function buildBridgeApproach(): {
   road: GeometryPart[];
   structure: GeometryPart[];
   cyan: GeometryPart[];
 } {
-  const frames = sampleFrames(ROUTE_U.skywayStart, ROUTE_U.skywayEnd, 40);
-  const road = deckParts(frames, SKYWAY_HALF_W, SKYWAY_HALF_W, DECK_THICKNESS);
-  const structure = [
-    ...railParts(frames, SKYWAY_HALF_W, RAIL_H),
-    ...pylonParts(frames, 30, 1.2)
-  ];
-  const cyan = edgeLightParts(frames, SKYWAY_HALF_W);
-  return { road, structure, cyan };
-}
-
-function buildConnector(): { road: GeometryPart[]; structure: GeometryPart[]; cyan: GeometryPart[] } {
-  const frames = sampleFrames(ROUTE_U.skywayEnd, ROUTE_U.bridgeStart, 10);
-  const road = deckParts(frames, SKYWAY_HALF_W, BRIDGE_HALF_W, DECK_THICKNESS);
-  const structure = [
-    ...railParts(frames, SKYWAY_HALF_W, RAIL_H),
-    ...pylonParts(frames, 30, 1.2)
-  ];
-  const cyan = edgeLightParts(frames, (SKYWAY_HALF_W + BRIDGE_HALF_W) / 2);
+  const frames = sampleFrames(ROUTE_U.researchEnd, ROUTE_U.bridgeStart, 10);
+  const road = deckParts(frames, BRIDGE_HALF_W, BRIDGE_HALF_W, DECK_THICKNESS);
+  const structure = railParts(frames, BRIDGE_HALF_W, RAIL_H);
+  const cyan = edgeLightParts(frames, BRIDGE_HALF_W);
   return { road, structure, cyan };
 }
 
@@ -871,8 +988,8 @@ export function buildStreets(rng: Rng): THREE.Group {
   const about = buildAboutStreet();
   const blvd = buildBoulevard();
   const shibuya = buildShibuya(materials);
-  const skyway = buildSkyway();
-  const connector = buildConnector();
+  const canyon = buildResearchCanyon();
+  const approach = buildBridgeApproach();
   const bridge = buildBridge();
   const manholes = DETAIL_MANHOLES ? buildManholes(rng) : [];
 
@@ -880,16 +997,17 @@ export function buildStreets(rng: Rng): THREE.Group {
     ...about.road,
     ...blvd.road,
     ...shibuya.road,
-    ...skyway.road,
-    ...connector.road,
+    ...canyon.road,
+    ...approach.road,
     ...bridge.road
   ];
-  const structureParts = [...skyway.structure, ...connector.structure, ...bridge.structure];
-  const curbParts = [...about.curb, ...blvd.curb, ...shibuya.curb];
-  const markingParts = [...about.marking, ...blvd.marking];
-  const cyanParts = [...skyway.cyan, ...connector.cyan, ...bridge.cyan];
+  const structureParts = [...approach.structure, ...bridge.structure];
+  const curbParts = [...about.curb, ...blvd.curb, ...shibuya.curb, ...canyon.curb];
+  const markingParts = [...about.marking, ...blvd.marking, ...canyon.marking];
+  const cyanParts = [...approach.cyan, ...bridge.cyan];
   const cableParts = [...bridge.cable];
-  const reflectorParts = DETAIL_REFLECTORS ? [...blvd.reflector] : [];
+  const reflectorParts = DETAIL_REFLECTORS ? [...blvd.reflector, ...canyon.reflector] : [];
+  const tealParts = [...canyon.teal];
 
   const roadMesh = mergeOne(roadParts, materials.road);
   if (DETAIL_WORN_PATCHES) applyWornPatches(roadMesh, rng, materials.road);
@@ -901,6 +1019,7 @@ export function buildStreets(rng: Rng): THREE.Group {
   group.add(mergeOne(cableParts, materials.cable));
   if (reflectorParts.length) group.add(mergeOne(reflectorParts, materials.reflector));
   if (manholes.length) group.add(mergeOne(manholes, materials.manhole));
+  if (tealParts.length) group.add(mergeOne(tealParts, materials.cable)); // holoTeal cable mat
   group.add(shibuya.crossing);
 
   return group;

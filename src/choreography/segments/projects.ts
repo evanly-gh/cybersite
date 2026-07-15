@@ -432,7 +432,7 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
   // slow-mo THROUGH each flip (u-rate ×0.55 — sandevistan moment),
   // normal on landing.
   //
-  // Baseline u-rate: (ROUTE_U.skywayStart - ROUTE_U.ramp1Base) / (0.62 - 0.38) ≈ base rate
+  // Baseline u-rate: (ROUTE_U.researchEntry - ROUTE_U.ramp1Base) / (0.62 - 0.38) ≈ base rate
   // We key specific u values at specific t values to achieve the rate ratios.
   //
   // t=0.38: bike at ramp1Base (drift segment left us here)
@@ -441,7 +441,7 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
   // t=0.50: past ramp1Land, normal speed toward ramp2
   // t=0.53: at ramp2Base ready to launch (accel)
   // t=0.565: at ramp2Land (slow-mo through flip)
-  // t=0.62: at skywayStart
+  // t=0.62: at researchEntry
 
   // Speed key design:
   // - Drift segment already registered { t:0.38, u:ramp1Base }; we must NOT add
@@ -473,8 +473,8 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
     { t: 0.53, u: ROUTE_U.ramp2Base },
     // Slow-mo THROUGH flip 2
     { t: 0.565, u: ROUTE_U.ramp2Land },
-    // After landing, continue to skyway
-    { t: 0.62, u: ROUTE_U.skywayStart }
+    // After landing, continue to research canyon
+    { t: 0.62, u: ROUTE_U.researchEntry }
   ]);
 
   // ---- Step 2: Camera keys ----

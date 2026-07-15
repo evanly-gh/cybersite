@@ -244,7 +244,7 @@ export function buildDriftFx(maxSmokePerWindow = SMOKE_COUNT): DriftFx {
   const landingMaterials: THREE.ShaderMaterial[] = [];
   for (const [wpStart, wpEnd] of [
     ['ramp1Land', 'ramp2Base'] as const,
-    ['ramp2Land', 'skywayStart'] as const
+    ['ramp2Land', 'researchEntry'] as const
   ]) {
     const uA = ROUTE_U[wpStart];
     const uB = uA + Math.min(0.003, (ROUTE_U[wpEnd] - uA) * 0.15);
@@ -324,7 +324,7 @@ export function buildDriftFx(maxSmokePerWindow = SMOKE_COUNT): DriftFx {
   buildParticles(uRamp1Land, uRamp1LandEnd, landingParticles[0], false);
 
   const uRamp2Land = ROUTE_U.ramp2Land;
-  const uRamp2LandEnd = uRamp2Land + (ROUTE_U.skywayStart - uRamp2Land) * 0.08;
+  const uRamp2LandEnd = uRamp2Land + (ROUTE_U.researchEntry - uRamp2Land) * 0.08;
   buildParticles(uRamp2Land, uRamp2LandEnd, landingParticles[1], false);
 
   // ---- update(t): pure f(t) -------------------------------------------
