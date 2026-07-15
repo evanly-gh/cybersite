@@ -475,7 +475,11 @@ function makeMoonColorTexture(rng: Rng): THREE.CanvasTexture {
     const cy = SIZE / 2;
 
     // --- Highland base ---
-    ctx.fillStyle = '#f5f0e6';
+    // Darkened from #f5f0e6 to #989080 so the highland surface sits BELOW the bloom
+    // threshold (~0.75 linear). This means the disc body doesn't bloom uniformly —
+    // only the bright crater rims and ejecta highlights bloom, preserving visible
+    // crater/maria detail in the close finale view (t=0.90-1.0).
+    ctx.fillStyle = '#989080';
     ctx.fillRect(0, 0, SIZE, SIZE);
 
     // --- Maria (dark seas) — hand-authored positions ---
@@ -681,19 +685,18 @@ function buildMoon(rng: Rng): THREE.Group {
   // from the same seeded rng sequentially, producing deterministic results each run.
   const bumpTexture = makeMoonBumpTexture(rng);
 
-  // --- Main sphere with MeshStandardMaterial ---
-  // emissiveIntensity 0.45 gives visible self-luminosity (readable at t=0.19 distant view)
-  // without blowing out bloom at the close finale shot (t=0.85, ~900m away).
+  // --- Main sphere: MeshBasicMaterial for art-directed surface ---
+  // Switched from MeshStandardMaterial to MeshBasicMaterial so the moon surface is
+  // purely texture-driven — unaffected by scene lighting (the directional key light at
+  // intensity 0.4 was pushing the near-white highland base above the bloom threshold,
+  // washing out all crater/maria detail in the close finale view).
+  // The darkened texture base (#989080) ensures the highland surface sits below the
+  // UnrealBloom threshold (~0.75 linear), so only bright crater rim highlights bloom
+  // rather than the entire disc. The glow sprites provide the atmospheric halo.
   const sphere = new THREE.Mesh(
     new THREE.SphereGeometry(MOON_RADIUS, 48, 32),
-    new THREE.MeshStandardMaterial({
+    new THREE.MeshBasicMaterial({
       map: moonTexture,
-      bumpMap: bumpTexture,
-      bumpScale: 0.8,
-      roughness: 0.92,
-      metalness: 0.0,
-      emissive: new THREE.Color(COLORS.moonlight),
-      emissiveIntensity: 0.45,
       fog: false,
     })
   );
@@ -703,12 +706,13 @@ function buildMoon(rng: Rng): THREE.Group {
 
   // --- Fresnel rim effect: slightly larger back-face sphere with additive blend ---
   // Creates a subtle bright halo around the moon's silhouette edge.
+  // opacity 0.08 (was 0.12): reduced to prevent additive stacking from blowing out at close range.
   const rimSphere = new THREE.Mesh(
     new THREE.SphereGeometry(MOON_RADIUS * 1.008, 48, 32),
     new THREE.MeshBasicMaterial({
       color: COLORS.moonlight,
       transparent: true,
-      opacity: 0.12,
+      opacity: 0.08,
       side: THREE.BackSide,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
@@ -723,11 +727,12 @@ function buildMoon(rng: Rng): THREE.Group {
   const glowTex = makeRadialGlowTexture();
 
   // Inner glow: tight halo just beyond the disc
+  // opacity 0.10 (was 0.22): tamed to reduce additive saturation at close finale range.
   const innerGlowMat = new THREE.SpriteMaterial({
     map: glowTex,
     color: COLORS.moonlight,
     transparent: true,
-    opacity: 0.22,
+    opacity: 0.10,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     fog: false,
@@ -739,11 +744,12 @@ function buildMoon(rng: Rng): THREE.Group {
   group.add(innerGlow);
 
   // Outer glow: wide, very dim atmospheric scatter
+  // opacity 0.04 (was 0.08): slightly tamed to reduce the additive halo pile-up.
   const outerGlowMat = new THREE.SpriteMaterial({
     map: glowTex,
     color: COLORS.moonlight,
     transparent: true,
-    opacity: 0.08,
+    opacity: 0.04,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     fog: false,
