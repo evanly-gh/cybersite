@@ -208,7 +208,17 @@ const LANDMARK_FOOTPRINT: Record<LandmarkKind, [number, number]> = {
 const GAP = 6;
 const FRONT_GAP = 4; // tighter inter-building gap on the storefront front walls (denser feel)
 const SIDEWALK_SETBACK = 11; // building near-edge distance from street centerline (front/wall zones)
-const CANYON_SETBACK = 8; // research-canyon near-edge: road halfwidth 7 → buildings ~1m off the road edge
+// Research-canyon near-edge distance from centerline (x=240). Road halfwidth 7 + sidewalk
+// 3 + 1m margin = 11 minimum clearance; the canyon reads as "tight/towering" via building
+// HEIGHT, never by intruding the road. (Was 8m — combined with the fillWall footprint bug
+// that let 40m-wide slabs stick 20m perpendicular, that put buildings 11m INTO the road.)
+const CANYON_SETBACK = 11;
+// Hard road-clearance clamp: no building's near-edge may sit closer than this to the
+// street centerline (About: z=0; boulevard/canyon: x=240). roadHalf 7 + sidewalk 3 + 1.
+const ROAD_HALFWIDTH = 7;
+const SIDEWALK_W = 3;
+const CLEARANCE_MARGIN = 1;
+const MIN_ROAD_CLEARANCE = ROAD_HALFWIDTH + SIDEWALK_W + CLEARANCE_MARGIN; // 11
 
 // Per-zone setbacks for the "back" zones whose buildings sit on the CAMERA's side of the
 // street for About and Projects sections.  These must be large enough that no building's
@@ -245,7 +255,18 @@ function rectsOverlap(a: { x: number; z: number; w: number; d: number }, b: { x:
 }
 
 /** Sequential fill along a street wall: walks a cursor down the corridor, weight-picks a
- * filler kind per slot, and skips over any reserved (landmark/venue) rects in its path. */
+ * filler kind per slot, and skips over any reserved (landmark/venue) rects in its path.
+ *
+ * ROTATED-FOOTPRINT CORRECTNESS (bug fix): a filler's nominal footprint is [fw, fd] in the
+ * builder's LOCAL frame — fw is the FRONT-FACE width (spans local X), fd the depth (spans
+ * local Z). Which world axis each maps to depends on the placement `rotY`: an axis-aligned
+ * turn (rotY≈0/π) keeps local X→world X; a quarter turn (rotY≈±π/2) swaps them. When the
+ * front face points at the road (the convention `facingRotY` now enforces), the width fw
+ * always runs ALONG the street and the depth fd runs PERPENDICULAR (into the block) — but
+ * we derive that from the rotation rather than assume it, and hard-clamp the near-edge to
+ * `MIN_ROAD_CLEARANCE` so no building can ever cross into the roadway. The prior code read
+ * fd as the perpendicular extent unconditionally, which let π/2-rotated walls stick their
+ * full width (e.g. a 40m slab) into a corridor sized for ~1m of clearance. */
 function fillWall(
   rng: Rng,
   axis: 'x' | 'z',
@@ -259,7 +280,8 @@ function fillWall(
   out: { blocks: BlockRect[]; buildings: BuildingSlot[] },
   idPrefix: string,
   gap: number = GAP,
-  rotYOverride?: number
+  rotYOverride?: number,
+  roadCenterPerp?: number
 ): void {
   const dir = to >= from ? 1 : -1;
   let cursor = from;
@@ -275,20 +297,43 @@ function fillWall(
     return weights[0][0];
   }
 
+  // Hard road-clearance clamp: the intended near-edge (fixedCoord) is pushed out if it sits
+  // closer than MIN_ROAD_CLEARANCE to the road center on the outward side.
+  const nearEdge =
+    roadCenterPerp === undefined
+      ? fixedCoord
+      : outward > 0
+        ? Math.max(fixedCoord, roadCenterPerp + MIN_ROAD_CLEARANCE)
+        : Math.min(fixedCoord, roadCenterPerp - MIN_ROAD_CLEARANCE);
+
   while ((dir > 0 && cursor < to) || (dir < 0 && cursor > to)) {
     const kind = pickKind();
     const [fw, fd] = FILLER_FOOTPRINT[kind];
-    // `fw` (face width) is always the extent along the sequential/pitch axis, whether
-    // that's x (About street) or z (boulevard) — `fd` (depth) is always perpendicular,
-    // and the building sits with its NEAR edge on `fixedCoord`, extending `outward`
-    // (away from the street) by `fd` — never centered ON the sidewalk line.
-    const span = fw;
+    const rotY = rotYOverride ?? facingRotY(zone);
+    // A quarter turn (|sin|≈1) swaps which local axis maps to the world perpendicular axis.
+    const quarter = Math.abs(Math.sin(rotY)) > 0.7071;
+    // perpExtent = world size perpendicular to the street (into/away from the road);
+    // alongExtent = world size along the street (the sequential pitch axis).
+    let perpExtent: number;
+    let alongExtent: number;
+    if (axis === 'z') {
+      // Street runs along world Z → perpendicular is world X. aligned: worldX=fw; quarter: worldX=fd.
+      perpExtent = quarter ? fd : fw;
+      alongExtent = quarter ? fw : fd;
+    } else {
+      // Street runs along world X → perpendicular is world Z. aligned: worldZ=fd; quarter: worldZ=fw.
+      perpExtent = quarter ? fw : fd;
+      alongExtent = quarter ? fd : fw;
+    }
+    const span = alongExtent;
     const center = cursor + (dir * span) / 2;
-    const perp = fixedCoord + (outward * fd) / 2;
+    // Building sits with its NEAR edge on `nearEdge`, extending `outward` (away from the
+    // street) by its REAL perpendicular extent — never centered ON the sidewalk line.
+    const perp = nearEdge + (outward * perpExtent) / 2;
     const rect: BlockRect =
       axis === 'x'
-        ? { x: center, z: perp, w: fw, d: fd, zone }
-        : { x: perp, z: center, w: fd, d: fw, zone };
+        ? { x: center, z: perp, w: alongExtent, d: perpExtent, zone }
+        : { x: perp, z: center, w: perpExtent, d: alongExtent, zone };
 
     const blocked = reserved.some((r) => rectsOverlap(rect, r));
     if (blocked) {
@@ -312,7 +357,6 @@ function fillWall(
     // template count); fillers always get plain roof clutter (still non-flat).
     const variant = 0;
     void rng.chance(0.7); // keep the rng stream shape stable regardless of this decision
-    const rotY = rotYOverride ?? facingRotY(zone);
     out.buildings.push({
       id: `${idPrefix}${i++}`,
       kind,
@@ -339,24 +383,29 @@ function fillWall(
  * +Z toward the street/camera; the far/back walls sit on the +Z side and face -Z.
  * Boulevard / research walls run along -Z at x=240. The projects/east wall sits on the
  * +X side and faces -X; the boulevard/west back wall sits on the -X side and faces +X. */
+// Builders author their FRONT face at local +Z, with the frontage WIDTH (fw) spanning
+// local X and DEPTH (fd) spanning local Z. A rotation θ about Y maps local +Z to world
+// (sinθ, 0, cosθ). We pick θ so the front points at the road AND the wide face lines the
+// street (small depth perpendicular) — this is what keeps the perpendicular extent small
+// (=fd) and the road clear.
 function facingRotY(zone: Zone): number {
   switch (zone) {
     case 'aboutWall':
     case 'aboutWallNear':
     case 'aboutWallFar':
-      return Math.PI / 2; // faces +Z (toward the street/camera on the -Z side)
+      return 0; // building at z<0, street at z=0 (+Z side): front +Z faces the street.
     case 'aboutBack':
-      return -Math.PI / 2; // faces -Z (back toward About street from the +Z side)
+      return Math.PI; // building at z>0, street at z=0 (-Z side): front faces -Z.
     case 'projectsWall':
-      return Math.PI; // east wall at x>240 faces -X (toward the boulevard)
+      return -Math.PI / 2; // east wall at x>240: front faces -X (toward the boulevard).
     case 'projectsBack':
     case 'projectsBackLegacy':
     case 'boulevard':
-      return 0; // west back wall at x<240 faces +X (toward the boulevard)
+      return Math.PI / 2; // west back wall at x<240: front faces +X (toward the boulevard).
     case 'researchCanyon':
     case 'bridgeApproach':
     case 'skywayFlank':
-      return 0; // placement-time rotation is overridden per-side in the canyon fill
+      return 0; // placement-time rotation is overridden per-side in the canyon/bridge fill
     default:
       return 0;
   }
@@ -509,22 +558,26 @@ export function computeCityLayout(seed: number): CityLayoutData {
     ['apartment', 0.2]
   ];
 
-  // About street: near wall (dense, tight gap) then far wall (taller mix).
-  fillWall(rng, 'x', ABOUT_X0, ABOUT_SPLIT, -SIDEWALK_SETBACK, -1, 'aboutWallNear', aboutNearWeights, reserved, { blocks, buildings }, 'aboutNear', FRONT_GAP);
-  fillWall(rng, 'x', ABOUT_SPLIT, ABOUT_X1, -SIDEWALK_SETBACK, -1, 'aboutWallFar', aboutFarWeights, reserved, { blocks, buildings }, 'aboutFar', FRONT_GAP);
+  // About street runs along world X at z=0 (road center z=0). Near/far walls sit on the -Z
+  // side (outward=-1) facing +Z; the clamp keeps their near-edge ≥ MIN_ROAD_CLEARANCE from z=0.
+  const ABOUT_ROAD_Z = 0;
+  fillWall(rng, 'x', ABOUT_X0, ABOUT_SPLIT, -SIDEWALK_SETBACK, -1, 'aboutWallNear', aboutNearWeights, reserved, { blocks, buildings }, 'aboutNear', FRONT_GAP, undefined, ABOUT_ROAD_Z);
+  fillWall(rng, 'x', ABOUT_SPLIT, ABOUT_X1, -SIDEWALK_SETBACK, -1, 'aboutWallFar', aboutFarWeights, reserved, { blocks, buildings }, 'aboutFar', FRONT_GAP, undefined, ABOUT_ROAD_Z);
   // aboutBack: near-edge at z=ABOUT_BACK_SETBACK (32), clearing the fixed About camera at z=+26.
-  fillWall(rng, 'x', ABOUT_X0, ABOUT_X1, ABOUT_BACK_SETBACK, 1, 'aboutBack', aboutBackWeights, reserved, { blocks, buildings }, 'aboutBack');
-  // Projects display wall: east side of the boulevard (faces -X toward the camera).
-  fillWall(rng, 'z', BLVD_Z0, BLVD_Z1 + 24, BLVD_X + SIDEWALK_SETBACK, 1, 'projectsWall', projectsWallWeights, reserved, { blocks, buildings }, 'projectsWall');
+  fillWall(rng, 'x', ABOUT_X0, ABOUT_X1, ABOUT_BACK_SETBACK, 1, 'aboutBack', aboutBackWeights, reserved, { blocks, buildings }, 'aboutBack', GAP, undefined, ABOUT_ROAD_Z);
+  // Boulevard/canyon/bridge run along world Z at x=240 (road center x=240).
+  // Projects display wall: east side (outward=+1), front faces -X toward the camera.
+  fillWall(rng, 'z', BLVD_Z0, BLVD_Z1 + 24, BLVD_X + SIDEWALK_SETBACK, 1, 'projectsWall', projectsWallWeights, reserved, { blocks, buildings }, 'projectsWall', GAP, undefined, BLVD_X);
   // boulevard back: near-edge at x=196 (BLVD_BACK_SETBACK), clearing the fixed Projects cameras at x=205.
-  fillWall(rng, 'z', BLVD_Z0, BLVD_Z1 + 24, BLVD_X - BLVD_BACK_SETBACK, -1, 'projectsBack', projectsBackWeights, reserved, { blocks, buildings }, 'projectsBack');
-  // Research canyon: TALL towers both sides, CANYON_SETBACK from centerline (near-edge
-  // x=232 west / x=248 east — outside the x∈[233,247] camera corridor). Tight gap.
-  fillWall(rng, 'z', CANYON_Z0 - 12, CANYON_Z1, BLVD_X + CANYON_SETBACK, 1, 'researchCanyon', canyonWeights, reserved, { blocks, buildings }, 'canyonR', 5, Math.PI);
-  fillWall(rng, 'z', CANYON_Z0 - 12, CANYON_Z1, BLVD_X - CANYON_SETBACK, -1, 'researchCanyon', canyonWeights, reserved, { blocks, buildings }, 'canyonL', 5, 0);
-  // Bridge approach: thinning transition, both sides, wider setback so the ramp reads open.
-  fillWall(rng, 'z', BRIDGE_Z0 - 6, BRIDGE_Z1, BLVD_X + SIDEWALK_SETBACK, 1, 'bridgeApproach', bridgeWeights, reserved, { blocks, buildings }, 'bridgeR', 8, Math.PI);
-  fillWall(rng, 'z', BRIDGE_Z0 - 6, BRIDGE_Z1, BLVD_X - SIDEWALK_SETBACK, -1, 'bridgeApproach', bridgeWeights, reserved, { blocks, buildings }, 'bridgeL', 8, 0);
+  fillWall(rng, 'z', BLVD_Z0, BLVD_Z1 + 24, BLVD_X - BLVD_BACK_SETBACK, -1, 'projectsBack', projectsBackWeights, reserved, { blocks, buildings }, 'projectsBack', GAP, undefined, BLVD_X);
+  // Research canyon: TALL towers both sides, near-edge clamped to x=251 east / x=229 west
+  // (MIN_ROAD_CLEARANCE=11 from x=240 → outside the x∈[233,247] road corridor + sidewalk).
+  // Front faces the road: east wall (outward=+1) rotY=-π/2, west wall (outward=-1) rotY=+π/2.
+  fillWall(rng, 'z', CANYON_Z0 - 12, CANYON_Z1, BLVD_X + CANYON_SETBACK, 1, 'researchCanyon', canyonWeights, reserved, { blocks, buildings }, 'canyonR', 5, -Math.PI / 2, BLVD_X);
+  fillWall(rng, 'z', CANYON_Z0 - 12, CANYON_Z1, BLVD_X - CANYON_SETBACK, -1, 'researchCanyon', canyonWeights, reserved, { blocks, buildings }, 'canyonL', 5, Math.PI / 2, BLVD_X);
+  // Bridge approach: thinning transition, both sides, front toward the road, clearance-clamped.
+  fillWall(rng, 'z', BRIDGE_Z0 - 6, BRIDGE_Z1, BLVD_X + SIDEWALK_SETBACK, 1, 'bridgeApproach', bridgeWeights, reserved, { blocks, buildings }, 'bridgeR', 8, -Math.PI / 2, BLVD_X);
+  fillWall(rng, 'z', BRIDGE_Z0 - 6, BRIDGE_Z1, BLVD_X - SIDEWALK_SETBACK, -1, 'bridgeApproach', bridgeWeights, reserved, { blocks, buildings }, 'bridgeL', 8, Math.PI / 2, BLVD_X);
 
   // --- Shibuya corners: office w/ mega billboard + storefront row, alternating ---
   // +z corners match their reserved positions (z=45, moved from 30 to clear drift camera).
