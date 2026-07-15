@@ -458,7 +458,7 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
   panelGroup1.name = 'researchPanel1';
   panelGroup1.position.set(-2, -12, 0);  // world x=238, y=20 (32-12)
   panelGroup1.rotation.y = Math.PI;
-  anchors.researchSky[0].add(panelGroup1);
+  anchors.researchCanyon[0].add(panelGroup1);
 
   const { group: truss1, thrusters: thrusters1 } = buildFloatingTruss(16, panelH);
   panelGroup1.add(truss1);
@@ -469,7 +469,7 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
   panelGroup2.name = 'researchPanel2';
   panelGroup2.position.set(+2, -8, 0);  // world x=242, y=24 (32-8)
   panelGroup2.rotation.y = Math.PI;
-  anchors.researchSky[1].add(panelGroup2);
+  anchors.researchCanyon[1].add(panelGroup2);
 
   const { group: truss2, thrusters: thrusters2 } = buildFloatingTruss(16, panelH);
   panelGroup2.add(truss2);
@@ -480,7 +480,7 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
   garnishGroup1.name = 'researchGarnish1';
   garnishGroup1.position.set(-2, -5, 0); // world x=238, y=27
   garnishGroup1.rotation.y = Math.PI;
-  anchors.researchSky[0].add(garnishGroup1);
+  anchors.researchCanyon[0].add(garnishGroup1);
   garnishGroup1.add(bbGarnish1.group);
 
   // --- Garnish 2: anchor[1], at similar height ---
@@ -488,7 +488,7 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
   garnishGroup2.name = 'researchGarnish2';
   garnishGroup2.position.set(+2, -2, 0); // world x=242, y=30
   garnishGroup2.rotation.y = Math.PI;
-  anchors.researchSky[1].add(garnishGroup2);
+  anchors.researchCanyon[1].add(garnishGroup2);
   garnishGroup2.add(bbGarnish2.group);
 
   // ---- Visibility / fade timing ----

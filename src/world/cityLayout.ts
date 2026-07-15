@@ -23,6 +23,13 @@ import {
   buildHydrant,
   buildTrashHeap
 } from '../assets/props/streetProps';
+import {
+  gltfCyberpunkTower,
+  gltfCommercialBlock,
+  gltfIndustrialUnit,
+  gltfResidentialTower,
+  type GltfLibrary
+} from '../assets/buildings/gltfBuildings';
 
 /**
  * Task 20: the zoned cyberpunk city. This module is split in two halves per the brief:
@@ -43,11 +50,17 @@ import {
 // ---------------------------------------------------------------------------------
 
 export type Zone =
+  | 'aboutWallNear' // dense storefront/apartment wall on the camera-facing side of About street
+  | 'aboutWallFar' // taller mixed office/apartment/tall wall further down About street
+  | 'aboutBack' // skyline depth behind the About camera
+  | 'shibuya' // the 4 dense scramble-crossing corners
+  | 'projectsWall' // the project display wall down the boulevard
+  | 'projectsBack' // boulevard skyline depth
+  | 'researchCanyon' // TALL buildings both sides of the ground-level research road
+  | 'bridgeApproach' // thinning transition into the bridge run
+  // legacy aliases (kept so incidental references still type-check; unused by the new layout)
   | 'aboutWall'
-  | 'aboutBack'
-  | 'shibuya'
-  | 'projectsWall'
-  | 'projectsBack'
+  | 'projectsBackLegacy'
   | 'boulevard'
   | 'skywayFlank';
 
@@ -59,7 +72,17 @@ export interface BlockRect {
   zone: Zone;
 }
 
-export type FillerKind = 'tallStepped' | 'tallSlab' | 'apartment' | 'officeHolo' | 'parking' | 'storefrontRow';
+export type FillerKind =
+  | 'tallStepped'
+  | 'tallSlab'
+  | 'apartment'
+  | 'officeHolo'
+  | 'parking'
+  | 'storefrontRow'
+  | 'gltfCyberpunkTower'
+  | 'gltfCommercialBlock'
+  | 'gltfIndustrialUnit'
+  | 'gltfResidentialTower';
 export type LandmarkKind = 'monolith' | 'radioMast' | 'monument' | 'restaurant' | 'ramen' | 'bar';
 
 export interface BuildingSlot {
@@ -150,7 +173,7 @@ export interface CityLayoutData {
   anchors: {
     aboutWall: Array<{ x: number; y: number; z: number; rotY: number }>;
     projectsWall: Array<{ x: number; y: number; z: number; rotY: number }>;
-    researchSky: Array<{ x: number; y: number; z: number; rotY: number }>;
+    researchCanyon: Array<{ x: number; y: number; z: number; rotY: number }>;
     introOverhead: { x: number; y: number; z: number };
   };
 }
@@ -164,7 +187,13 @@ export const FILLER_FOOTPRINT: Record<FillerKind, [number, number]> = {
   apartment: [22, 14],
   officeHolo: [26, 18],
   parking: [34, 22],
-  storefrontRow: [32, 9]
+  storefrontRow: [32, 9],
+  // GLTF kinds (Task G). Footprints match the builders' rng size ranges (upper end used
+  // as the placement pitch so the rng-jittered mesh never overruns its lot).
+  gltfCyberpunkTower: [24, 20],
+  gltfCommercialBlock: [46, 12], // up to 5 bays x 9m = 45m wide
+  gltfIndustrialUnit: [32, 24],
+  gltfResidentialTower: [26, 18]
 };
 
 const LANDMARK_FOOTPRINT: Record<LandmarkKind, [number, number]> = {
@@ -177,7 +206,9 @@ const LANDMARK_FOOTPRINT: Record<LandmarkKind, [number, number]> = {
 };
 
 const GAP = 6;
+const FRONT_GAP = 4; // tighter inter-building gap on the storefront front walls (denser feel)
 const SIDEWALK_SETBACK = 11; // building near-edge distance from street centerline (front/wall zones)
+const CANYON_SETBACK = 8; // research-canyon near-edge: road halfwidth 7 → buildings ~1m off the road edge
 
 // Per-zone setbacks for the "back" zones whose buildings sit on the CAMERA's side of the
 // street for About and Projects sections.  These must be large enough that no building's
@@ -200,11 +231,14 @@ const BLVD_BACK_SETBACK  = 44;  // boulevard near-edge at x=196; camera at x=205
 // comment, not import, since streets.ts doesn't export its internal PLAZA_SIZE/ABOUT_LEN).
 const ABOUT_X0 = -296;
 const ABOUT_X1 = 210; // stop short of the Shibuya plaza (plaza half-size 20 @ x=240)
+const ABOUT_SPLIT = -100; // aboutWallNear (dense storefronts) west of here; aboutWallFar (taller mix) east
 const BLVD_X = WAYPOINTS.shibuyaCenter.x; // 240
 const BLVD_Z0 = -24; // just south of the plaza
 const BLVD_Z1 = WAYPOINTS.researchEntry.z; // -420
-const SKYWAY_Z0 = BLVD_Z1;
-const SKYWAY_Z1 = WAYPOINTS.researchEnd.z; // -800
+const CANYON_Z0 = BLVD_Z1; // -420: research canyon start
+const CANYON_Z1 = WAYPOINTS.researchEnd.z; // -800: research canyon end
+const BRIDGE_Z0 = CANYON_Z1; // -800
+const BRIDGE_Z1 = -860; // bridge approach ramp end
 
 function rectsOverlap(a: { x: number; z: number; w: number; d: number }, b: { x: number; z: number; w: number; d: number }): boolean {
   return Math.abs(a.x - b.x) * 2 < a.w + b.w && Math.abs(a.z - b.z) * 2 < a.d + b.d;
@@ -223,7 +257,9 @@ function fillWall(
   weights: Array<[FillerKind, number]>,
   reserved: BlockRect[],
   out: { blocks: BlockRect[]; buildings: BuildingSlot[] },
-  idPrefix: string
+  idPrefix: string,
+  gap: number = GAP,
+  rotYOverride?: number
 ): void {
   const dir = to >= from ? 1 : -1;
   let cursor = from;
@@ -260,11 +296,15 @@ function fillWall(
       const reservedHit = reserved.find((r) => rectsOverlap(rect, r))!;
       const reservedSpan = axis === 'x' ? reservedHit.w : reservedHit.d;
       const reservedCenter = axis === 'x' ? reservedHit.x : reservedHit.z;
-      cursor = reservedCenter + (dir * reservedSpan) / 2 + dir * GAP;
+      cursor = reservedCenter + (dir * reservedSpan) / 2 + dir * gap;
       continue;
     }
 
     out.blocks.push(rect);
+    // Register this placement as reserved so LATER walls (which share this same `reserved`
+    // list) route around it — prevents cross-wall overlaps where two perpendicular walls
+    // meet at a corner, or two collinear walls abut at a zone seam.
+    reserved.push(rect);
     // Draw-call budget: filler buildings are instanced GLOBALLY by (kind, variant) —
     // see buildCity — so every placement of a given kind/variant shares one InstancedMesh
     // set regardless of zone. Roof billboards are reserved for the Shibuya/hero unique
@@ -272,7 +312,7 @@ function fillWall(
     // template count); fillers always get plain roof clutter (still non-flat).
     const variant = 0;
     void rng.chance(0.7); // keep the rng stream shape stable regardless of this decision
-    const rotY = zone === 'aboutWall' || zone === 'projectsWall' ? facingRotY(zone) : facingRotY(zone) + Math.PI;
+    const rotY = rotYOverride ?? facingRotY(zone);
     out.buildings.push({
       id: `${idPrefix}${i++}`,
       kind,
@@ -288,24 +328,35 @@ function fillWall(
       hasRoofClutter: true
     });
 
-    cursor = center + (dir * span) / 2 + dir * GAP;
+    cursor = center + (dir * span) / 2 + dir * gap;
   }
 }
 
 /** Outward-facing rotation (radians) for a wall zone's buildings — front face points at
- * the street the zone flanks. */
+ * the street the zone flanks.
+ *
+ * About-street walls run along +X. The near wall sits on the -Z side (z<0) and must face
+ * +Z toward the street/camera; the far/back walls sit on the +Z side and face -Z.
+ * Boulevard / research walls run along -Z at x=240. The projects/east wall sits on the
+ * +X side and faces -X; the boulevard/west back wall sits on the -X side and faces +X. */
 function facingRotY(zone: Zone): number {
   switch (zone) {
     case 'aboutWall':
+    case 'aboutWallNear':
+    case 'aboutWallFar':
       return Math.PI / 2; // faces +Z (toward the street/camera on the -Z side)
     case 'aboutBack':
-      return -Math.PI / 2;
+      return -Math.PI / 2; // faces -Z (back toward About street from the +Z side)
     case 'projectsWall':
-      return Math.PI; // faces -X (toward the boulevard)
+      return Math.PI; // east wall at x>240 faces -X (toward the boulevard)
+    case 'projectsBack':
+    case 'projectsBackLegacy':
     case 'boulevard':
-      return 0;
+      return 0; // west back wall at x<240 faces +X (toward the boulevard)
+    case 'researchCanyon':
+    case 'bridgeApproach':
     case 'skywayFlank':
-      return Math.PI / 2;
+      return 0; // placement-time rotation is overridden per-side in the canyon fill
     default:
       return 0;
   }
@@ -349,32 +400,32 @@ export function computeCityLayout(seed: number): CityLayoutData {
     });
   }
 
-  // Monolith landmark, visible down both streets.
-  addLandmark('monolith', 140, -60, Math.PI / 4, 'boulevard', 'monolith');
-  // Radio mast + monument along the skyway flank / About plaza.
-  addLandmark('radioMast', 255, -450, 0, 'skywayFlank', 'radioMast');
-  addLandmark('monument', -20, -14, Math.PI / 2, 'aboutWall', 'monument');
+  // Monolith landmark, in the open lot west of the boulevard, visible down both streets.
+  addLandmark('monolith', 140, -60, Math.PI / 4, 'projectsBack', 'monolith');
+  // Radio mast far east of the boulevard (out of the research-canyon camera corridor).
+  addLandmark('radioMast', 292, -200, 0, 'projectsBack', 'radioMast');
+  addLandmark('monument', -20, -14, Math.PI / 2, 'aboutWallFar', 'monument');
 
   // Venues clustered near the About-street midpoint.
-  const aboutMid = (ABOUT_X0 + ABOUT_X1) / 2;
-  addLandmark('restaurant', aboutMid - 10, -SIDEWALK_SETBACK, Math.PI / 2, 'aboutWall', 'restaurant');
+  const aboutMid = (ABOUT_X0 + ABOUT_X1) / 2; // ≈ -43
+  addLandmark('restaurant', aboutMid - 10, -SIDEWALK_SETBACK, Math.PI / 2, 'aboutWallFar', 'restaurant');
   addLandmark('ramen', aboutMid + 20, ABOUT_BACK_SETBACK, -Math.PI / 2, 'aboutBack', 'ramen0');
   addLandmark('bar', aboutMid - 40, ABOUT_BACK_SETBACK, -Math.PI / 2, 'aboutBack', 'bar');
-  // Ramen repeat near the gas station on the boulevard.
-  // Placed at x=183 (well within the BLVD_BACK_SETBACK=44 back zone, x≤196) so it
-  // does not intrude into the camera corridor (camera at x=205).
+  // Ramen repeat near the gas station on the boulevard back zone.
   addLandmark('ramen', 183, -235, Math.PI, 'projectsBack', 'ramen1');
 
   buildings.push(...landmarkSlots);
 
-  // Gas station moved to x=183 (inside BLVD_BACK_SETBACK zone) so it does not
-  // intrude into the camera corridor (cameras at x≈205 look across boulevard to x≈251.5).
+  // Gas station at x=183 (inside BLVD_BACK_SETBACK zone) so it does not intrude into the
+  // camera corridor (cameras at x≈205 look across boulevard to x≈251.5).
   const gasStation = { x: 183, z: -240 };
-  reserved.push({ x: gasStation.x, z: gasStation.z, w: 22, d: 16, zone: 'boulevard' });
+  reserved.push({ x: gasStation.x, z: gasStation.z, w: 22, d: 16, zone: 'projectsBack' });
 
   cranes.push({ x: 300, z: -140, swinging: true }, { x: 170, z: -520, swinging: false });
-  reserved.push({ x: 300, z: -140, w: 16, d: 16, zone: 'boulevard' });
-  reserved.push({ x: 170, z: -520, w: 16, d: 16, zone: 'skywayFlank' });
+  reserved.push({ x: 300, z: -140, w: 16, d: 16, zone: 'projectsBack' });
+  // Crane at x=170 z=-520: far west of the research-canyon west wall (near-edge x=232),
+  // clear of the x∈[233,247] camera corridor.
+  reserved.push({ x: 170, z: -520, w: 16, d: 16, zone: 'researchCanyon' });
 
   // Reserve the 4 Shibuya corner footprints up front (computed below, but geometry is
   // fixed) so the boulevard fill routes around them instead of clipping into the plaza.
@@ -396,54 +447,84 @@ export function computeCityLayout(seed: number): CityLayoutData {
   }
 
   // --- filler walls ---
-  // Front-wall zones (aboutWall/projectsWall) stay storefrontRow/apartment/officeHolo
-  // ONLY — those need clean, low, flat-adjacent faces as Phase-5 content anchors, so no
-  // added height variety there. Back zones (aboutBack/projectsBack/skywayFlank) sit
-  // across the street from the anchors and never host content, so they're where the
-  // skyline gets its height variety: tallStepped/tallSlab/parking are folded into their
-  // weight tables below. Each added kind is still one globally-instanced template (see
-  // instanceTemplate) — cheap regardless of placement count — but IS a new "always
-  // drawn where visible" line item, so weights are kept modest and the draw-call budget
-  // is re-audited after (Step 6 of the brief) rather than assumed safe.
-  const aboutWallWeights: Array<[FillerKind, number]> = [
-    ['storefrontRow', 0.4],
-    ['apartment', 0.3],
-    ['officeHolo', 0.3]
+  // The front-wall zones (aboutWallNear/aboutWallFar/projectsWall) host Phase-5 content
+  // anchors and stay low/mid so the holo-panels read cleanly against them; the back and
+  // canyon zones carry the skyline height. Every kind (including the 4 GLTF kinds) is one
+  // globally-instanced template (see instanceTemplate) — cheap regardless of placement
+  // count — but each IS a new "always drawn where visible" line item, so canyon/back
+  // weights stay modest and the draw-call budget is re-audited (Step 6) after.
+  //
+  // aboutWallNear (x -296..-100): dense camera-facing storefronts + apartments + a
+  // commercial GLTF row for variety. Tight FRONT_GAP for a packed shopfront feel.
+  const aboutNearWeights: Array<[FillerKind, number]> = [
+    ['storefrontRow', 0.42],
+    ['apartment', 0.28],
+    ['gltfCommercialBlock', 0.18],
+    ['officeHolo', 0.12]
   ];
-  const aboutBackWeights: Array<[FillerKind, number]> = [
-    ['storefrontRow', 0.3],
-    ['apartment', 0.4],
-    ['tallStepped', 0.12],
-    ['tallSlab', 0.12],
-    ['parking', 0.06]
-  ];
-  const projectsWallWeights: Array<[FillerKind, number]> = [['officeHolo', 1]];
-  const projectsBackWeights: Array<[FillerKind, number]> = [
-    ['apartment', 0.35],
-    ['storefrontRow', 0.35],
-    ['tallStepped', 0.12],
-    ['tallSlab', 0.12],
-    ['parking', 0.06]
-  ];
-  const skywayWeights: Array<[FillerKind, number]> = [
-    ['officeHolo', 0.6],
+  // aboutWallFar (x -100..210): taller mixed wall — office/apartment/tallStepped/residential.
+  const aboutFarWeights: Array<[FillerKind, number]> = [
+    ['officeHolo', 0.34],
+    ['apartment', 0.28],
     ['tallStepped', 0.16],
-    ['tallSlab', 0.16],
-    ['parking', 0.08]
+    ['gltfResidentialTower', 0.14],
+    ['storefrontRow', 0.08]
+  ];
+  // aboutBack (z=+32): pure skyline depth — tall + parking + industrial sheds.
+  const aboutBackWeights: Array<[FillerKind, number]> = [
+    ['apartment', 0.3],
+    ['tallStepped', 0.2],
+    ['tallSlab', 0.18],
+    ['gltfIndustrialUnit', 0.14],
+    ['parking', 0.1],
+    ['storefrontRow', 0.08]
+  ];
+  // projectsWall (x=251.5 east of boulevard): office display wall.
+  const projectsWallWeights: Array<[FillerKind, number]> = [
+    ['officeHolo', 0.7],
+    ['gltfResidentialTower', 0.3]
+  ];
+  // projectsBack (x=196 west of boulevard): boulevard skyline depth.
+  const projectsBackWeights: Array<[FillerKind, number]> = [
+    ['apartment', 0.3],
+    ['tallStepped', 0.2],
+    ['tallSlab', 0.18],
+    ['gltfIndustrialUnit', 0.14],
+    ['parking', 0.1],
+    ['storefrontRow', 0.08]
+  ];
+  // researchCanyon (BOTH sides of x=240, z -420..-800): the key new spatial experience —
+  // TALL towers placed CLOSE (CANYON_SETBACK=8) so a low camera looking up sees an
+  // enclosed neon corridor. Only tall kinds (50-120m) here.
+  const canyonWeights: Array<[FillerKind, number]> = [
+    ['tallSlab', 0.28],
+    ['tallStepped', 0.26],
+    ['gltfCyberpunkTower', 0.26],
+    ['gltfResidentialTower', 0.2]
+  ];
+  // bridgeApproach (z -800..-860): thinning transition — skinnier slab + residential.
+  const bridgeWeights: Array<[FillerKind, number]> = [
+    ['tallSlab', 0.5],
+    ['gltfResidentialTower', 0.3],
+    ['apartment', 0.2]
   ];
 
-  fillWall(rng, 'x', ABOUT_X0, ABOUT_X1, -SIDEWALK_SETBACK, -1, 'aboutWall', aboutWallWeights, reserved, { blocks, buildings }, 'aboutWall');
-  // aboutBack: use ABOUT_BACK_SETBACK (32) so buildings start at z=+32, clearing the
-  // fixed About camera at z=+26 (and its sightline to aboutWall at z=-11.5).
+  // About street: near wall (dense, tight gap) then far wall (taller mix).
+  fillWall(rng, 'x', ABOUT_X0, ABOUT_SPLIT, -SIDEWALK_SETBACK, -1, 'aboutWallNear', aboutNearWeights, reserved, { blocks, buildings }, 'aboutNear', FRONT_GAP);
+  fillWall(rng, 'x', ABOUT_SPLIT, ABOUT_X1, -SIDEWALK_SETBACK, -1, 'aboutWallFar', aboutFarWeights, reserved, { blocks, buildings }, 'aboutFar', FRONT_GAP);
+  // aboutBack: near-edge at z=ABOUT_BACK_SETBACK (32), clearing the fixed About camera at z=+26.
   fillWall(rng, 'x', ABOUT_X0, ABOUT_X1, ABOUT_BACK_SETBACK, 1, 'aboutBack', aboutBackWeights, reserved, { blocks, buildings }, 'aboutBack');
+  // Projects display wall: east side of the boulevard (faces -X toward the camera).
   fillWall(rng, 'z', BLVD_Z0, BLVD_Z1 + 24, BLVD_X + SIDEWALK_SETBACK, 1, 'projectsWall', projectsWallWeights, reserved, { blocks, buildings }, 'projectsWall');
-  // boulevard back: use BLVD_BACK_SETBACK (44) so buildings start at x=196, clearing the
-  // fixed Projects cameras at x=205 (sightline to projectsWall at x≈251.5).
-  fillWall(rng, 'z', BLVD_Z0, BLVD_Z1 + 24, BLVD_X - BLVD_BACK_SETBACK, -1, 'boulevard', projectsBackWeights, reserved, { blocks, buildings }, 'projectsBack');
-  // Skyway flank: sparse, both sides, larger pitch (footprints already sized ~34-40, gap x2).
-  // Starts 12m past BLVD_Z1 (seam buffer, matching the boulevard fill's early stop above).
-  fillWall(rng, 'z', SKYWAY_Z0 - 24, SKYWAY_Z1, BLVD_X + SIDEWALK_SETBACK, 1, 'skywayFlank', skywayWeights, reserved, { blocks, buildings }, 'skyR');
-  fillWall(rng, 'z', SKYWAY_Z0 - 24, SKYWAY_Z1, BLVD_X - SIDEWALK_SETBACK, -1, 'skywayFlank', skywayWeights, reserved, { blocks, buildings }, 'skyL');
+  // boulevard back: near-edge at x=196 (BLVD_BACK_SETBACK), clearing the fixed Projects cameras at x=205.
+  fillWall(rng, 'z', BLVD_Z0, BLVD_Z1 + 24, BLVD_X - BLVD_BACK_SETBACK, -1, 'projectsBack', projectsBackWeights, reserved, { blocks, buildings }, 'projectsBack');
+  // Research canyon: TALL towers both sides, CANYON_SETBACK from centerline (near-edge
+  // x=232 west / x=248 east — outside the x∈[233,247] camera corridor). Tight gap.
+  fillWall(rng, 'z', CANYON_Z0 - 12, CANYON_Z1, BLVD_X + CANYON_SETBACK, 1, 'researchCanyon', canyonWeights, reserved, { blocks, buildings }, 'canyonR', 5, Math.PI);
+  fillWall(rng, 'z', CANYON_Z0 - 12, CANYON_Z1, BLVD_X - CANYON_SETBACK, -1, 'researchCanyon', canyonWeights, reserved, { blocks, buildings }, 'canyonL', 5, 0);
+  // Bridge approach: thinning transition, both sides, wider setback so the ramp reads open.
+  fillWall(rng, 'z', BRIDGE_Z0 - 6, BRIDGE_Z1, BLVD_X + SIDEWALK_SETBACK, 1, 'bridgeApproach', bridgeWeights, reserved, { blocks, buildings }, 'bridgeR', 8, Math.PI);
+  fillWall(rng, 'z', BRIDGE_Z0 - 6, BRIDGE_Z1, BLVD_X - SIDEWALK_SETBACK, -1, 'bridgeApproach', bridgeWeights, reserved, { blocks, buildings }, 'bridgeL', 8, 0);
 
   // --- Shibuya corners: office w/ mega billboard + storefront row, alternating ---
   // +z corners match their reserved positions (z=45, moved from 30 to clear drift camera).
@@ -480,12 +561,12 @@ export function computeCityLayout(seed: number): CityLayoutData {
   // the per-viewpoint draw-call budget. The ≥100 total-billboard count is carried by the
   // cheap globally-instanced repeats below instead.
   const uniqueSpots: Array<[number, number, number, AdFormat, BillboardMount, Zone]> = [
-    [aboutMid - 60, -SIDEWALK_SETBACK - 0.2, Math.PI / 2, 'landscape', 'wall', 'aboutWall'],
-    [aboutMid - 20, 0, 0, 'strip', 'stand', 'aboutWall'],
+    [aboutMid - 60, -SIDEWALK_SETBACK - 0.2, Math.PI / 2, 'landscape', 'wall', 'aboutWallFar'],
+    [aboutMid - 20, 0, 0, 'strip', 'stand', 'aboutWallFar'],
     [cx, 22, 0, 'landscape', 'roof', 'shibuya'],
     [cx + 26, 26, -Math.PI / 4, 'landscape', 'wall', 'shibuya'],
     [BLVD_X + SIDEWALK_SETBACK + 0.2, -100, -Math.PI / 2, 'landscape', 'wall', 'projectsWall'],
-    [BLVD_X, 0, Math.PI / 2, 'strip', 'stand', 'boulevard']
+    [BLVD_X, 0, Math.PI / 2, 'strip', 'stand', 'projectsBack']
   ];
   uniqueSpots.forEach(([x, z, rotY, format, mount, zone], i) => {
     billboards.push({ id: `hero${i}`, x, y: 0, z, rotY, format, mount, unique: true, zone });
@@ -496,7 +577,8 @@ export function computeCityLayout(seed: number): CityLayoutData {
   // groups, same reasoning as the filler-kind count above.
   const repeatFormats: AdFormat[] = ['vcard'];
   let bi = 0;
-  for (let x = ABOUT_X0 + 15; x < ABOUT_X1 - 15; x += 16) {
+  // About street: denser sidewalk vcards (12m pitch, was 16m).
+  for (let x = ABOUT_X0 + 12; x < ABOUT_X1 - 12; x += 12) {
     for (const side of [-1, 1] as const) {
       billboards.push({
         id: `rep${bi++}`,
@@ -507,11 +589,12 @@ export function computeCityLayout(seed: number): CityLayoutData {
         format: repeatFormats[bi % repeatFormats.length],
         mount: 'stand',
         unique: false,
-        zone: side < 0 ? 'aboutWall' : 'aboutBack'
+        zone: side < 0 ? (x < ABOUT_SPLIT ? 'aboutWallNear' : 'aboutWallFar') : 'aboutBack'
       });
     }
   }
-  for (let z = BLVD_Z0 - 15; z > SKYWAY_Z1 + 15; z -= 16) {
+  // Boulevard + canyon: stand-mounted sidewalk vcards down both sides.
+  for (let z = BLVD_Z0 - 14; z > BRIDGE_Z1 + 14; z -= 14) {
     for (const side of [-1, 1] as const) {
       billboards.push({
         id: `rep${bi++}`,
@@ -522,7 +605,25 @@ export function computeCityLayout(seed: number): CityLayoutData {
         format: repeatFormats[bi % repeatFormats.length],
         mount: 'stand',
         unique: false,
-        zone: side < 0 ? (z > BLVD_Z1 ? 'boulevard' : 'skywayFlank') : z > BLVD_Z1 ? 'projectsWall' : 'skywayFlank'
+        zone: z > BLVD_Z1 ? (side < 0 ? 'projectsBack' : 'projectsWall') : 'researchCanyon'
+      });
+    }
+  }
+  // Research canyon neon corridor: wall-mounted landscape ads high on the canyon walls,
+  // BELOW the y=20-28 content anchors so they frame (not compete with) the holo-panels.
+  // All one globally-instanced 'landscape:wall' repeat group → cheap regardless of count.
+  for (let z = CANYON_Z0 - 20; z > CANYON_Z1 + 20; z -= 26) {
+    for (const side of [-1, 1] as const) {
+      billboards.push({
+        id: `rep${bi++}`,
+        x: BLVD_X + side * (CANYON_SETBACK + 0.3),
+        y: 12,
+        z,
+        rotY: side < 0 ? 0 : Math.PI,
+        format: 'landscape',
+        mount: 'wall',
+        unique: false,
+        zone: 'researchCanyon'
       });
     }
   }
@@ -537,11 +638,11 @@ export function computeCityLayout(seed: number): CityLayoutData {
   // --- street lamps every 22m, alternating sides ---
   let side = 1;
   for (let x = ABOUT_X0 + 8; x < ABOUT_X1 - 8; x += 22) {
-    lamps.push({ x, z: side * (SIDEWALK_SETBACK - 3.5), rotY: side < 0 ? Math.PI / 2 : -Math.PI / 2, zone: 'aboutWall' });
+    lamps.push({ x, z: side * (SIDEWALK_SETBACK - 3.5), rotY: side < 0 ? Math.PI / 2 : -Math.PI / 2, zone: x < ABOUT_SPLIT ? 'aboutWallNear' : 'aboutWallFar' });
     side *= -1;
   }
   for (let z = BLVD_Z0 - 8; z > BLVD_Z1 + 8; z -= 22) {
-    lamps.push({ x: BLVD_X + side * (SIDEWALK_SETBACK - 3.5), z, rotY: side < 0 ? 0 : Math.PI, zone: 'boulevard' });
+    lamps.push({ x: BLVD_X + side * (SIDEWALK_SETBACK - 3.5), z, rotY: side < 0 ? 0 : Math.PI, zone: 'projectsBack' });
     side *= -1;
   }
 
@@ -623,12 +724,17 @@ export function computeCityLayout(seed: number): CityLayoutData {
     z,
     rotY: -Math.PI / 2
   }));
-  const researchSkyAnchors = [0.15, 0.4, 0.65, 0.9].map((t) => ({
-    x: BLVD_X,
-    y: 32,
-    z: SKYWAY_Z0 + (SKYWAY_Z1 - SKYWAY_Z0) * t,
-    rotY: 0
-  }));
+  // Research canyon anchors: mounted HIGH on the canyon walls (y=20-28), alternating
+  // sides, so a LOW camera (y≈1.5 at x=240) riding the ground-level road looks UP at them.
+  // Left/west wall anchors sit at x=233 facing +X (rotY toward the road from the west);
+  // right/east wall anchors at x=247 facing -X. (Task I positions panel children with a
+  // small local offset off these anchors.)
+  const researchCanyonAnchors = [
+    { x: 233, y: 24, z: -480, rotY: Math.PI / 2 }, // left/west wall
+    { x: 247, y: 26, z: -560, rotY: -Math.PI / 2 }, // right/east wall
+    { x: 233, y: 22, z: -650, rotY: Math.PI / 2 }, // left/west wall
+    { x: 247, y: 28, z: -730, rotY: -Math.PI / 2 } // right/east wall
+  ];
   const introOverhead = { x: WAYPOINTS.introStart.x + 20, y: 15, z: 0 };
 
   return {
@@ -646,7 +752,7 @@ export function computeCityLayout(seed: number): CityLayoutData {
     anchors: {
       aboutWall: aboutWallAnchors,
       projectsWall: projectsWallAnchors,
-      researchSky: researchSkyAnchors,
+      researchCanyon: researchCanyonAnchors,
       introOverhead
     }
   };
@@ -659,7 +765,7 @@ export function computeCityLayout(seed: number): CityLayoutData {
 export interface DisplayAnchors {
   aboutWall: THREE.Object3D[];
   projectsWall: THREE.Object3D[];
-  researchSky: THREE.Object3D[];
+  researchCanyon: THREE.Object3D[];
   introOverhead: THREE.Object3D;
 }
 
@@ -670,19 +776,42 @@ export interface City {
   anchors: DisplayAnchors;
 }
 
-const FILLER_BUILDERS: Record<FillerKind, (rng: Rng) => THREE.Group> = {
+/** Options for buildCity. `gltf` is an optional pre-loaded GLTF library (Task L calls
+ * loadGltfModels() at boot and passes it in). When absent, the gltf* filler builders use
+ * their procedural fallbacks — keeping buildCity synchronous and layout deterministic. */
+export interface BuildCityOptions {
+  density?: number;
+  gltf?: GltfLibrary;
+}
+
+/** Filler-building template builders. GLTF kinds receive the (possibly-null) library and
+ * fall back to procedural geometry when a model is unavailable. */
+const FILLER_BUILDERS: Record<FillerKind, (rng: Rng, gltf: GltfLibrary | null) => THREE.Group> = {
   tallStepped: (rng) => buildTallStepped(rng),
   tallSlab: (rng) => buildTallSlab(rng),
   apartment: (rng) => buildApartment(rng),
   officeHolo: (rng) => buildOfficeHolo(rng),
   parking: (rng) => buildParking(rng),
-  storefrontRow: (rng) => buildStorefrontRow(rng, 4)
+  storefrontRow: (rng) => buildStorefrontRow(rng, 4),
+  gltfCyberpunkTower: (rng, gltf) => gltfCyberpunkTower(gltf ?? EMPTY_GLTF, rng),
+  gltfCommercialBlock: (rng, gltf) => gltfCommercialBlock(gltf ?? EMPTY_GLTF, rng),
+  gltfIndustrialUnit: (rng, gltf) => gltfIndustrialUnit(gltf ?? EMPTY_GLTF, rng),
+  gltfResidentialTower: (rng, gltf) => gltfResidentialTower(gltf ?? EMPTY_GLTF, rng)
+};
+
+/** A library where every model is unavailable — used when buildCity is called without a
+ * gltf param, so the gltf* builders take their procedural fallback path. */
+const EMPTY_GLTF: GltfLibrary = {
+  cyberpunkTower: { scene: null, url: '', available: false },
+  commercialBlock: { scene: null, url: '', available: false },
+  industrialUnit: { scene: null, url: '', available: false },
+  residentialTower: { scene: null, url: '', available: false }
 };
 
 /** Builds one filler template (building + roof clutter, optionally a roof billboard),
  * origin at ground center — ready to be replicated via `instanceTemplate`. */
-function buildFillerTemplate(kind: FillerKind, rng: Rng, withRoofBillboard: boolean): THREE.Group {
-  const group = FILLER_BUILDERS[kind](rng);
+function buildFillerTemplate(kind: FillerKind, rng: Rng, withRoofBillboard: boolean, gltf: GltfLibrary | null): THREE.Group {
+  const group = FILLER_BUILDERS[kind](rng, gltf);
   const roofY = (group.userData.roofY as number) ?? 0;
   const footprint = (group.userData.footprint as [number, number]) ?? FILLER_FOOTPRINT[kind];
   const roof = decorateRoof({ y: 0, w: footprint[0], d: footprint[1] }, rng, { billboard: withRoofBillboard });
@@ -783,7 +912,9 @@ const CITY_SEED_SALT = {
   metro: 15000
 };
 
-export function buildCity(seed: number, density = 1): City {
+export function buildCity(seed: number, opts: BuildCityOptions | number = {}): City {
+  // Back-compat: buildCity(seed, density) is still accepted (old callers pass a number).
+  const { density = 1, gltf = null } = typeof opts === 'number' ? { density: opts } : opts;
   const layout = computeCityLayout(seed);
   const group = new THREE.Group();
   group.name = 'city';
@@ -808,7 +939,7 @@ export function buildCity(seed: number, density = 1): City {
   let templateSalt = 0;
   for (const [kind, slots] of fillerByKind) {
     const rng = makeRng(seed + CITY_SEED_SALT.filler + templateSalt++);
-    const template = buildFillerTemplate(kind, rng, false);
+    const template = buildFillerTemplate(kind, rng, false, gltf);
     const instanced = instanceTemplate(
       template,
       slots.map((s) => ({ x: s.x, z: s.z, rotY: s.rotY }))
@@ -1069,7 +1200,7 @@ export function buildCity(seed: number, density = 1): City {
   const anchors: DisplayAnchors = {
     aboutWall: layout.anchors.aboutWall.map(makeAnchor),
     projectsWall: layout.anchors.projectsWall.map(makeAnchor),
-    researchSky: layout.anchors.researchSky.map(makeAnchor),
+    researchCanyon: layout.anchors.researchCanyon.map(makeAnchor),
     introOverhead: makeAnchor({ ...layout.anchors.introOverhead, rotY: 0 })
   };
 

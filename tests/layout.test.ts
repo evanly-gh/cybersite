@@ -60,7 +60,7 @@ describe('computeCityLayout (pure data)', () => {
   it('positions display anchors sensibly (About wall on the -Z side, projects wall on the +X side)', () => {
     expect(layout.anchors.aboutWall.length).toBeGreaterThan(0);
     expect(layout.anchors.projectsWall.length).toBeGreaterThan(0);
-    expect(layout.anchors.researchSky.length).toBeGreaterThan(0);
+    expect(layout.anchors.researchCanyon.length).toBeGreaterThan(0);
     for (const a of layout.anchors.aboutWall) expect(a.z).toBeLessThan(0);
     for (const a of layout.anchors.projectsWall) expect(a.x).toBeGreaterThan(240);
   });
@@ -116,7 +116,7 @@ describe('buildCity (mesh assembly)', () => {
     const city = buildCity(1337);
     expect(city.anchors.aboutWall.length).toBeGreaterThan(0);
     expect(city.anchors.projectsWall.length).toBeGreaterThan(0);
-    expect(city.anchors.researchSky.length).toBeGreaterThan(0);
+    expect(city.anchors.researchCanyon.length).toBeGreaterThan(0);
     expect(city.anchors.introOverhead).toBeInstanceOf(THREE.Object3D);
   });
 
