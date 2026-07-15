@@ -64,7 +64,8 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
     { registerDriftSegment },
     { registerProjectsSegment },
     { registerResearchSegment },
-    { registerFinaleSegment }
+    { registerFinaleSegment },
+    { loadGltfModels }
   ] = await Promise.all([
     import('./utils/rng'),
     import('./world/cityLayout'),
@@ -84,29 +85,36 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
     import('./choreography/segments/drift'),
     import('./choreography/segments/projects'),
     import('./choreography/segments/research'),
-    import('./choreography/segments/finale')
+    import('./choreography/segments/finale'),
+    import('./assets/buildings/gltfBuildings')
   ]);
 
-  // 6. Build world (city seed 1337, matching city.ts viewer entry)
+  // 6. Preload GLTF model library — resolves gracefully with {available:false} entries
+  //    when .glb files are absent (they are not present yet). buildCity uses the library
+  //    as visual templates; layout positions remain seed-deterministic regardless.
+  const gltf = await loadGltfModels('/models/');
+  loader.setProgress(20);
+
+  // 7. Build world (city seed 1337, matching city.ts viewer entry)
   // On mobile: density=0.5 halves Ring 2 far-field instance count + billboard repeats.
   const density = isMobile ? 0.5 : 1;
   const rng = makeRng(1337);
-  const city = buildCity(1337, density);
+  const city = buildCity(1337, { density, gltf });
   const streets = buildStreets(makeRng(1337 + 1));
   const farField = buildFarField(makeRng(1337 + 2), density);
   loader.setProgress(30);
 
-  // 7. Build traffic
+  // 8. Build traffic
   const traffic = buildTraffic(makeRng(1337 + 3));
   loader.setProgress(45);
 
-  // 8. Build bike
+  // 9. Build bike
   const bikeAsset = buildBike(makeRng(1337 + 4));
   bikeAsset.group.name = 'bike';
   bikeAsset.group.userData.isBike = true;
   loader.setProgress(55);
 
-  // 9. Build FX
+  // 10. Build FX
   // On mobile: cap smoke particles at 20 per window (default 40)
   const maxSmoke = isMobile ? 20 : 40;
   const sandevistan = buildSandevistan(bikeAsset.ghostGeometry);
@@ -114,7 +122,7 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
   const driftFx = buildDriftFx(maxSmoke);
   loader.setProgress(65);
 
-  // 10. Assemble scene (same order as city.ts viewer entry: far → streets → city)
+  // 11. Assemble scene (same order as city.ts viewer entry: far → streets → city)
   core.scene.add(farField.group);
   core.scene.add(streets);
   core.scene.add(city.group);
@@ -125,14 +133,14 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
   core.scene.add(driftFx.group);
   loader.setProgress(75);
 
-  // 11. Add lighting (ambient + hemisphere for night city)
+  // 12. Add lighting (ambient + hemisphere for night city)
   const hemi = new THREE.HemisphereLight(0x1a2040, 0x07080f, 0.6);
   core.scene.add(hemi);
   const key = new THREE.DirectionalLight(0xffffff, 0.4);
   key.position.set(50, 100, -50);
   core.scene.add(key);
 
-  // 12. Build choreography components
+  // 13. Build choreography components
   const rig = new CameraRig();
   const bikePath = new BikePath();
 
@@ -177,13 +185,13 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
 
   loader.setProgress(85);
 
-  // 13. Detect reduced-motion preference early so we can wire segments + master correctly.
+  // 14. Detect reduced-motion preference early so we can wire segments + master correctly.
   // We call initReducedMotion ONCE here just to check the flag; the full initialization
   // (with setProgress) happens after master is ready below.
   const isReducedMotion = typeof window !== 'undefined' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // 14a. Register intro segment keys (camera + bike + in-world title)
+  // 15a. Register intro segment keys (camera + bike + in-world title)
   const introSegment = registerIntroSegment({
     rig,
     bike: bikePath,
@@ -237,7 +245,7 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
 
   loader.setProgress(100);
 
-  // 15. Detect ?shot= mode early — in shot mode we skip loader.hide() and
+  // 16. Detect ?shot= mode early — in shot mode we skip loader.hide() and
   // render synchronously, then the master signals __READY after 2 frames.
   const isShotMode = new URLSearchParams(window.location.search).has('shot');
 
@@ -296,7 +304,7 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
       }
     });
 
-    // 17. Wire reduced-motion scroll snapping + scroll hint pulse.
+    // 18. Wire reduced-motion scroll snapping + scroll hint pulse.
     // initReducedMotion receives masterHandle.setProgress so that:
     //  - In RM mode: the scroll listener calls setProgress with snapped vignette values.
     //  - In standard mode: the 4-second idle timer starts; pulseScrollHint modulates
@@ -310,7 +318,7 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
     rmOnProgress = rmHandle.onProgress;
   }
 
-  // 18. ?stats=1 — print draw-call + triangle info to console after first render.
+  // 19. ?stats=1 — print draw-call + triangle info to console after first render.
   if (new URLSearchParams(window.location.search).has('stats')) {
     // After 2 rAFs (past the loader hide), renderer.info will reflect the live scene.
     requestAnimationFrame(() => {
