@@ -3,6 +3,7 @@ import { COLORS } from '../../theme';
 import type { Rng } from '../../utils/rng';
 import { type GeometryPart } from '../../utils/merge';
 import { boxPart, mergeOne, makeBodyMat, makeGlowMat } from '../buildings/tall';
+import { makeCanvasTexture } from '../../utils/canvasText';
 
 /**
  * Task 18 (part 1/4): tower cranes over the Blade Runner 2049 skyline gap sites.
@@ -131,6 +132,28 @@ function addBoom(
   }
 }
 
+function hex(n: number): string {
+  return '#' + n.toString(16).padStart(6, '0');
+}
+
+/**
+ * Task E: Alternating yellow-black hazard stripe canvas texture for the crane jib.
+ * Used as emissiveMap on a thin plane laid along the jib surface.
+ */
+function makeJibStripeTex(): THREE.CanvasTexture {
+  const w = 256;
+  const h = 32;
+  return makeCanvasTexture(w, h, (ctx) => {
+    const stripeW = 28;
+    for (let x = 0; x < w; x += stripeW * 2) {
+      ctx.fillStyle = hex(COLORS.sodiumAmber);
+      ctx.fillRect(x, 0, stripeW, h);
+      ctx.fillStyle = '#111111';
+      ctx.fillRect(x + stripeW, 0, stripeW, h);
+    }
+  });
+}
+
 export interface CraneAsset {
   group: THREE.Group;
   updateAmbient(sec: number): void;
@@ -219,6 +242,11 @@ export function buildCrane(rng: Rng, swinging = false): CraneAsset {
     boxPart(new THREE.Vector3(1.4, cabY + 0.2, 1.05), new THREE.Vector3(1.5, 1.1, 0.08)),
     boxPart(new THREE.Vector3(1.4, cabY + 0.2, -1.05), new THREE.Vector3(1.5, 1.1, 0.08))
   );
+  // Task E: small dark window inset plane (dark glossy) on the +X face of the cab
+  // (gives the impression of a separate pane rather than a plain glow box)
+  steel.push(boxPart(new THREE.Vector3(2.48, cabY + 0.2, 0), new THREE.Vector3(0.04, 0.95, 1.3)));
+  // Task E: tiny interior amber light dot — a small emissive sphere inside the cab
+  amber.push(boxPart(new THREE.Vector3(1.2, cabY + 0.35, 0), new THREE.Vector3(0.12, 0.12, 0.12)));
 
   // --- hazard warning stripes (amber): mast base band + jib-tip band + counterweight edge ---
   amber.push(
@@ -307,6 +335,27 @@ export function buildCrane(rng: Rng, swinging = false): CraneAsset {
     'trolley'
   );
   group.add(trolley);
+
+  // Task E: alternating yellow-black hazard stripe plane along the jib top chord
+  const jibStripeTex = makeJibStripeTex();
+  jibStripeTex.wrapS = THREE.RepeatWrapping;
+  jibStripeTex.repeat.set(jibLen / 4, 1);
+  const jibStripe = new THREE.Mesh(
+    new THREE.PlaneGeometry(jibLen - 1, 0.35),
+    new THREE.MeshStandardMaterial({
+      color: 0x000000,
+      emissive: 0xffffff,
+      emissiveMap: jibStripeTex,
+      emissiveIntensity: 0.9,
+      roughness: 0.95,
+      transparent: true,
+      opacity: 0.88
+    })
+  );
+  jibStripe.rotation.x = -Math.PI / 2;
+  jibStripe.position.set(jibLen / 2, boomY + 0.07, 0);
+  jibStripe.name = 'jibStripe';
+  group.add(jibStripe);
 
   const phase = rng.range(0, Math.PI * 2);
   const swingAmp = THREE.MathUtils.degToRad(4);
