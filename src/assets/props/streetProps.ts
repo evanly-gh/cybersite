@@ -313,7 +313,7 @@ function makeVendingFaceTex(rng: Rng): THREE.CanvasTexture {
     const canW = 44;
     const canH = 56;
     const startX = (w - nCans * (canW + 8)) / 2;
-    const canColors = [COLORS.signalMagenta, COLORS.holoTeal, COLORS.sodiumAmber, COLORS.tronCyan];
+    const canColors = [COLORS.signalMagenta, COLORS.holoTeal, COLORS.sodiumAmber, COLORS.moonlight];
     for (let i = 0; i < nCans; i++) {
       const cx = startX + i * (canW + 8);
       const cy = 30;

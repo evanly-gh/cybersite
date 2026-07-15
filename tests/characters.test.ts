@@ -32,11 +32,13 @@ const POSES: PersonPose[] = ['walk', 'stand', 'sit'];
 
 describe('buildPerson', () => {
   for (const pose of POSES) {
-    it(`${pose}: builds a valid group with <= 2 draw calls`, () => {
+    it(`${pose}: builds a valid group with <= 3 draw calls`, () => {
       const p = buildPerson(makeRng(1), pose);
       expect(p.group).toBeInstanceOf(THREE.Group);
       expect(typeof p.updateAmbient).toBe('function');
-      expect(countDrawCalls(p.group)).toBeLessThanOrEqual(2);
+      // 3 material groups: body, accent, eyes (eyes split out so cybernetic
+      // eyes glow independently of accent color — approved in the people upgrade).
+      expect(countDrawCalls(p.group)).toBeLessThanOrEqual(3);
     });
 
     it(`${pose}: finite matrices at build and after updateAmbient over a range of seconds`, () => {

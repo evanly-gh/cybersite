@@ -9,7 +9,7 @@ import { mergeParts, xform, type RigPart } from './rig';
  * Rig: single SkinnedMesh, 11 rigid-bound bones. 3 material groups:
  *   [0] body — matte street-tone coat/skin
  *   [1] accent — neon stripe/collar/umbrella-rim/phone-glow (dark when inactive)
- *   [2] eyes — glowing cybernetic eyes (tronCyan or signalMagenta), always lit
+ *   [2] eyes — glowing cybernetic eyes (holoTeal / signalMagenta / amber), always lit
  * = 3 draw calls per person (brief allows this: "adding a 2nd body material costs
  *   1 draw call per person — that's acceptable").
  *
@@ -104,7 +104,7 @@ function hairTones(rng: Rng): THREE.Color {
   ];
   const vivids = [
     new THREE.Color(COLORS.signalMagenta),
-    new THREE.Color(COLORS.tronCyan),
+    new THREE.Color(COLORS.holoTeal),
     new THREE.Color(COLORS.sodiumAmber),
     new THREE.Color(COLORS.holoTeal),
   ];
@@ -124,7 +124,7 @@ interface BuiltParts {
  *
  * Eyes: two small CapsuleGeometry on either side of the face center, placed at
  * the equator of the head sphere (y = HEAD_Y0, z offset), pushed forward (x+).
- * Eye color is a separate material group (M.eyes) so it can glow bright tronCyan
+ * Eye color is a separate material group (M.eyes) so it can glow bright holoTeal
  * independently of the accent color.
  */
 function addFaceFeatures(p: RigPart[], eyeVariant: 'teal' | 'magenta' | 'amber'): void {
@@ -547,7 +547,7 @@ export function buildPerson(rng: Rng, pose: PersonPose): PersonAsset {
   // Eye glow material — always lit, separate draw call so eyes can be bright cyan/magenta
   // regardless of accent color.
   const eyeColorHex =
-    eyeVariant === 'teal' ? COLORS.tronCyan :
+    eyeVariant === 'teal' ? COLORS.holoTeal :
     eyeVariant === 'magenta' ? COLORS.signalMagenta :
     COLORS.sodiumAmber;
   const eyesMat = new THREE.MeshStandardMaterial({
@@ -760,7 +760,7 @@ export function buildCrowd(rng: Rng, n: number, area: [number, number]): CrowdAs
   // uniform tron-cyan reads as a crowd of cyber-people even at crowd distance).
   const eyeGlowMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(0x020408),
-    emissive: new THREE.Color(COLORS.tronCyan),
+    emissive: new THREE.Color(COLORS.holoTeal),
     emissiveIntensity: 3.0,
     roughness: 0.05,
     metalness: 0.0

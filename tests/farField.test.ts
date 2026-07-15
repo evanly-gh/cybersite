@@ -140,13 +140,19 @@ describe('farField', () => {
     const { group } = buildFarField(makeRng(1));
     const moonGroup = findByName(group, 'moon') as THREE.Group;
     expect(moonGroup).toBeDefined();
-    let sphere: THREE.Mesh | undefined;
+    // The moon is now several meshes (body sphere + Fresnel-rim sphere + glow
+    // sprites). Find the main body: the sphere-geometry mesh whose radius is
+    // exactly MOON_RADIUS.
+    let body: THREE.Mesh | undefined;
     moonGroup.traverse((o) => {
-      if ((o as THREE.Mesh).isMesh) sphere = o as THREE.Mesh;
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const geo = m.geometry as THREE.SphereGeometry;
+      if (geo?.parameters?.radius === MOON_RADIUS) body = m;
     });
-    expect(sphere).toBeDefined();
-    expect(sphere!.position.distanceTo(MOON_POS)).toBeLessThan(1e-6);
-    const geo = sphere!.geometry as THREE.SphereGeometry;
+    expect(body).toBeDefined();
+    expect(body!.position.distanceTo(MOON_POS)).toBeLessThan(1e-6);
+    const geo = body!.geometry as THREE.SphereGeometry;
     expect(geo.parameters.radius).toBe(MOON_RADIUS);
   });
 
