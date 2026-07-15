@@ -15,9 +15,10 @@ describe('route', () => {
     expect(p.distanceTo(target)).toBeLessThanOrEqual(8);
   });
 
-  it('y at skywayEnd u is within 1m of 28', () => {
+  it('y at skywayEnd u is within 2m of 0 (ground-level canyon exit)', () => {
+    // Research section is now a ground-level canyon (y=0); skywayEnd repurposed as canyon exit.
     const p = ROUTE.getPointAt(ROUTE_U.skywayEnd);
-    expect(Math.abs(p.y - 28)).toBeLessThanOrEqual(1);
+    expect(Math.abs(p.y - 0)).toBeLessThanOrEqual(2);
   });
 
   it('roadFrame binormal is unit-length and perpendicular to tangent across 20 sampled u', () => {

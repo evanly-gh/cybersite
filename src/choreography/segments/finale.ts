@@ -2,7 +2,8 @@
  * Task 30 — Finale segment (t 0.79 – 1.0)
  *
  * ARCHITECTURE:
- *  The money shot. Bike accelerates from skywayEnd down onto the ocean bridge,
+ *  The money shot. Bike accelerates from the research canyon exit (ground level, y≈0)
+ *  up the bridge-approach ramp (y=0→3→14) and onto the ocean bridge,
  *  riding straight toward the massive rising moon over the black ocean.
  *
  *  - Camera: chase from behind (shows moon ahead) at t=0.79, then slow pull-back
@@ -22,16 +23,22 @@
  *
  * CAMERA GEOMETRY:
  *  Moon at (240, 260, -2600), MOON_RADIUS=320. Bridge runs along x=240, y≈12-14,
- *  z from -860 to -1400. Camera chase from behind:
- *    t=0.79: 8m behind bike, 3m up — sees moon dead ahead down the bridge.
+ *  z from -860 to -1400. Research canyon exits at y=0, z≈-800. Bridge approach ramp
+ *  (z=-800 to -860) climbs y=0→14. Camera chase from behind:
+ *    t=0.79: 8m behind bike (y≈0 at canyon exit), 3m up — sees moon dead ahead.
+ *    t=0.80: bike hits bridge-approach ramp, begins climbing to y=14.
  *    t=0.84: 14m behind, 6m up — moon fills upper half, bike is small silhouette.
  *    t=0.92: 18m behind, 7m up, FOV=50 — moon even larger, biker tiny against it.
  *    t=0.96: 20m behind, 8m up, FOV=48 — hold here, biker drifts toward moon.
  *    t=1.0:  hold at t=0.96 pose — biker continues riding into the moon.
+ *  All camera offsets (behindM, upM) are RELATIVE to the bike's world position, so
+ *  the climb from y=0 to y=14 is handled automatically by roadFrame().
  *
  * SPEED KEYS:
  *  Research ended at t=0.79 with u = ROUTE_U.skywayStart + 0.65*(ROUTE_U.skywayEnd - ROUTE_U.skywayStart).
- *  Finale: continuous acceleration, reaching bridgeEnd (ROUTE_U.bridgeEnd) by t=1.0.
+ *  At the new ground-level route, skywayEnd = (240,0,-800) so uAt79 puts the bike
+ *  at ~z=-730 (65% along the 380m canyon). The bike then climbs the bridgeApproach
+ *  ramp and reaches bridgeEnd by t=1.0.
  *  u-rate ramps ×2.5 over the segment (piecewise with 3 keys).
  *
  * CLOSING TYPE:
@@ -260,11 +267,11 @@ export function registerFinaleSegment(opts: FinaleSegmentOptions): FinaleSegment
   // ---- Step 1: Speed keys ----
   // Research segment ended at:
   //   { t:0.79, u: ROUTE_U.skywayStart + 0.65*(ROUTE_U.skywayEnd - ROUTE_U.skywayStart) }
-  // We share that boundary t=0.79.
-  // Finale: continuous acceleration from skywayEnd area to bridgeEnd.
+  // We share that boundary t=0.79. skywayEnd is now (240,0,-800) — ground-level canyon exit.
+  // Finale: continuous acceleration from canyon exit through bridge-approach ramp to bridgeEnd.
   // u-rate ramps ×2.5: we achieve this with 3 keys creating a steeper slope toward t=1.0.
   //
-  // uAt79: must match research segment's last u exactly.
+  // uAt79: must match research segment's last u exactly (65% of skyway/canyon span).
   const uAt79 = ROUTE_U.skywayStart + 0.65 * (ROUTE_U.skywayEnd - ROUTE_U.skywayStart);
   // uAt100: bridgeEnd — where the bike reaches by the end of the scroll
   const uAt100 = ROUTE_U.bridgeEnd;
@@ -287,13 +294,17 @@ export function registerFinaleSegment(opts: FinaleSegmentOptions): FinaleSegment
   ]);
 
   // ---- Step 2: Camera keys ----
-  // Chase-behind camera. The bridge section runs from z≈-860 to z=-1400, x=240.
+  // Chase-behind camera. Canyon exits at y≈0 near z≈-730; bridge-approach ramp climbs
+  // y=0→14 from z=-800 to z=-860; bridge runs z=-860 to z=-1400 at y≈12-14.
   // Moon at (240, 260, -2600) — dead ahead and high.
   // Camera behind = more positive Z. Camera looks toward the bike then ahead toward moon.
+  // All offsets (behindM, upM) are relative to roadFrame() at uAt79-derived bike positions,
+  // so the ramp climb is handled automatically.
   //
   // Key strategy:
-  //   t=0.79: 8m behind, 3m up → bike at ~z=-820, cam at z≈-812, looking at bike+moon ahead
-  //   t=0.82: 10m behind, 4m up → opening reveal
+  //   t=0.79: 8m behind, 3m up → bike at ground level ~z=-730, cam looking ahead toward bridge
+  //   t=0.80: (snap) bike starts climbing bridge-approach ramp, camera adjusts with it
+  //   t=0.82: 10m behind, 4m up → opening reveal, moon appears above horizon
   //   t=0.84: 14m behind, 6m up → moon starts dominating
   //   t=0.88: 16m behind, 7m up, FOV=52
   //   t=0.92: 18m behind, 7.5m up, FOV=50
@@ -319,7 +330,7 @@ export function registerFinaleSegment(opts: FinaleSegmentOptions): FinaleSegment
   // takes over. This means there's a hard snap at t=0.800, which is intentional and short
   // enough to feel like a "cut" at the moment the bridge segment begins.
   const keySpecs: CamKeySpec[] = [
-    { t: 0.800, behindM:  8, upM: 3.0, fov: 58, roll: 0 },  // chase starts (snap from research)
+    { t: 0.800, behindM:  8, upM: 3.0, fov: 58, roll: 0 },  // chase starts (snap from research); bike at ground-level canyon
     { t: 0.820, behindM: 10, upM: 4.0, fov: 56, roll: 0 },  // chase stabilizes
     { t: 0.850, behindM: 14, upM: 5.5, fov: 54, roll: 0 },  // pull back, moon reveals
     { t: 0.880, behindM: 16, upM: 6.5, fov: 52, roll: 0 },

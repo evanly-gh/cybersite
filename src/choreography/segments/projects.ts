@@ -5,7 +5,7 @@
  *  - Two ramp backflips: air window 1 (t 0.42–0.475) over ramp1, air window 2 (t 0.53–0.565) over ramp2.
  *  - Camera: low chase (t 0.38–0.42) → fixed side pose watching ramp1 flip (t 0.42–0.50)
  *            → brief re-chase (t 0.50–0.53) → fixed side pose watching ramp2 flip (t 0.53–0.60)
- *            → pull back to chase toward skyway (t 0.60–0.62).
+ *            → pull back to chase toward canyon entrance (ground-level, t 0.60–0.62).
  *  - Displays: two large holos (TTT-E2E, RememberMe) placed ABOVE and BELOW the ramp1 arc
  *              band with ≥1.5m clearance — the arc reads as intentional negative space.
  *              Three square cards (Mandarin, Bellevue 2nd, DubHacks) under the ramp2 arc.
@@ -441,7 +441,7 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
   // t=0.50: past ramp1Land, normal speed toward ramp2
   // t=0.53: at ramp2Base ready to launch (accel)
   // t=0.565: at ramp2Land (slow-mo through flip)
-  // t=0.62: at skywayStart
+  // t=0.62: at skywayStart (canyon entrance, ground-level y=0)
 
   // Speed key design:
   // - Drift segment already registered { t:0.38, u:ramp1Base }; we must NOT add
@@ -510,9 +510,11 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
   const rechasePos = new THREE.Vector3(243, 2, -190);
   const rechaseLook = new THREE.Vector3(241, 1.5, -280);
 
-  // Skyway approach chase
-  const skywayChasePos = new THREE.Vector3(243, 4, -380);
-  const skywayLook = new THREE.Vector3(241, 10, -480);
+  // Canyon approach chase — aims at ground-level canyon entrance (skywayStart at z=-420, y=0).
+  // The old "skyway" was elevated (y=28); the new canyon is flat at y=0, so camera and
+  // look target drop accordingly. Camera y=2 (just above ground), look at y=1 (ground level).
+  const canyonChasePos = new THREE.Vector3(243, 2, -380);
+  const canyonLook = new THREE.Vector3(241, 1, -480);
 
   rig.addKeys([
     // Anchor at t=0.38 (shared boundary with drift segment which ends here)
@@ -618,12 +620,12 @@ export function registerProjectsSegment(opts: ProjectsSegmentOptions): ProjectsS
         roll: 0
       }
     },
-    // Pull back to chase rising toward skyway
+    // Pull back to chase toward canyon entrance (ground-level, no climb)
     {
       t: 0.62,
       pose: {
-        pos: skywayChasePos.clone(),
-        look: skywayLook.clone(),
+        pos: canyonChasePos.clone(),
+        look: canyonLook.clone(),
         fov: 60,
         roll: 0
       },
