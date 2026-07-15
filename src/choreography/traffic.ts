@@ -249,14 +249,15 @@ export function buildTraffic(rng: Rng): TrafficSystem {
   // -----------------------------------------------------------------------
   // Get route u-ranges at call time (ROUTE_U is computed at module load of route.ts)
   // -----------------------------------------------------------------------
-  const uAboutStart  = ROUTE_U.aboutStart;
-  const uAboutEnd    = ROUTE_U.shibuyaCenter;
-  const uBlvdStart   = ROUTE_U.driftExit;
-  const uBlvdEnd     = ROUTE_U.researchEntry;
-  const uSkywayStart = ROUTE_U.researchEntry;
-  const uSkywayEnd   = ROUTE_U.researchEnd;
-  const uBridgeStart = ROUTE_U.bridgeStart;
-  const uBridgeEnd   = ROUTE_U.bridgeEnd;
+  const uAboutStart   = ROUTE_U.aboutStart;
+  const uAboutEnd     = ROUTE_U.shibuyaCenter;
+  const uBlvdStart    = ROUTE_U.driftExit;
+  const uBlvdEnd      = ROUTE_U.researchEntry;
+  // Research canyon: ground-level corridor from researchEntry→researchEnd (formerly elevated skyway)
+  const uCanyonStart  = ROUTE_U.researchEntry;
+  const uCanyonEnd    = ROUTE_U.researchEnd;
+  const uBridgeStart  = ROUTE_U.bridgeStart;
+  const uBridgeEnd    = ROUTE_U.bridgeEnd;
 
   // -----------------------------------------------------------------------
   // ABOUT STREET — 2+2 lanes: ±3.5 m and ±7 m
@@ -307,13 +308,14 @@ export function buildTraffic(rng: Rng): TrafficSystem {
   addHoverVehicle(ROUTE_U.shibuyaCenter + 0.025, 0.0, 8.0, 4.0, 'B', false);
 
   // -----------------------------------------------------------------------
-  // SKYWAY — 1+1 lanes: ±3.5 m. Narrow elevated road.
-  // Target: 4 cars
+  // RESEARCH CANYON — ground-level corridor (formerly elevated skyway).
+  // 1+1 lanes: ±3.5 m. Narrow canyon road, sparse traffic.
+  // Target: 4 ground cars (no hover — canyon walls block sky-lane lines)
   // -----------------------------------------------------------------------
-  for (const u0 of spawnPoints(uSkywayStart, uSkywayEnd, 2)) {
+  for (const u0 of spawnPoints(uCanyonStart, uCanyonEnd, 2)) {
     addCar(u0, 0.0025, 3.5);
   }
-  for (const u0 of spawnPoints(uSkywayStart, uSkywayEnd, 2)) {
+  for (const u0 of spawnPoints(uCanyonStart, uCanyonEnd, 2)) {
     addCar(u0, -0.0032, -3.5);
   }
 
