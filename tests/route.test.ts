@@ -15,7 +15,7 @@ describe('route', () => {
     expect(p.distanceTo(target)).toBeLessThanOrEqual(8);
   });
 
-  it('y at researchEnd u is within 1m of 0', () => {
+  it('y at researchEnd u is within 1m of 0 (ground-level canyon, not elevated skyway)', () => {
     const p = ROUTE.getPointAt(ROUTE_U.researchEnd);
     expect(Math.abs(p.y - 0)).toBeLessThanOrEqual(1);
   });

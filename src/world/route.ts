@@ -7,7 +7,8 @@ import * as THREE from 'three';
  *
  * Path shape: +X along "About street" from introStart to shibuyaCenter, a hard right
  * turn onto -Z through the Shibuya-style crossing, two skate ramps (ramp1/ramp2),
- * a ground-level research canyon, then a long bridge run out toward the moon.
+ * then a ground-level research canyon (y=0, z -420 to -800), a short bridge-approach
+ * ramp, and a long bridge run out toward the moon.
  */
 export const WAYPOINTS = {
   introStart: new THREE.Vector3(-300, 0, 0),
