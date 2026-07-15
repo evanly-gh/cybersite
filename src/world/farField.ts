@@ -460,61 +460,299 @@ function buildStars(rng: Rng, count: number): THREE.Points {
 // Moon
 // ---------------------------------------------------------------------------------
 
+/**
+ * Paints a realistic full-moon surface onto a 1024×1024 canvas.
+ * Hand-authored maria placement approximates a real full moon view:
+ *   - Oceanus Procellarum (left), Mare Imbrium (upper-left),
+ *   - Mare Serenitatis (upper-center), Mare Tranquillitatis (center-right),
+ *   - Mare Crisium (right edge).
+ * Large and small craters use the seeded rng for repeatable placement.
+ */
+function makeMoonColorTexture(rng: Rng): THREE.CanvasTexture {
+  const SIZE = 1024;
+  return makeCanvasTexture(SIZE, SIZE, (ctx) => {
+    const cx = SIZE / 2;
+    const cy = SIZE / 2;
+
+    // --- Highland base ---
+    ctx.fillStyle = '#f5f0e6';
+    ctx.fillRect(0, 0, SIZE, SIZE);
+
+    // --- Maria (dark seas) — hand-authored positions ---
+    // Each entry: [centerX, centerY, radiusX, radiusY, opacity]
+    const maria: [number, number, number, number, number][] = [
+      // Oceanus Procellarum — large, left side
+      [310, 500, 210, 240, 0.22],
+      // Mare Imbrium — upper-left
+      [390, 330, 155, 140, 0.20],
+      // Mare Serenitatis — upper-center-right
+      [580, 360, 100, 95, 0.18],
+      // Mare Tranquillitatis — center-right
+      [610, 490, 110, 90, 0.19],
+      // Mare Crisium — far right, smallish
+      [760, 370, 58, 50, 0.16],
+      // Mare Nubium — lower-left
+      [430, 640, 90, 70, 0.15],
+    ];
+
+    for (const [mx, my, rx, ry, alpha] of maria) {
+      const grd = ctx.createRadialGradient(mx, my, 0, mx, my, Math.max(rx, ry));
+      grd.addColorStop(0, `rgba(60,55,45,${alpha})`);
+      grd.addColorStop(0.65, `rgba(55,50,40,${(alpha * 0.6).toFixed(3)})`);
+      grd.addColorStop(1, 'rgba(60,55,45,0)');
+      ctx.save();
+      ctx.scale(rx / Math.max(rx, ry), ry / Math.max(rx, ry));
+      ctx.beginPath();
+      ctx.arc(
+        mx / (rx / Math.max(rx, ry)),
+        my / (ry / Math.max(rx, ry)),
+        Math.max(rx, ry) * 1.1,
+        0, Math.PI * 2
+      );
+      ctx.fillStyle = grd;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // --- Large craters (15) with rim highlights and ejecta rays for biggest ---
+    const largeCraters: [number, number, number][] = [];
+    for (let i = 0; i < 15; i++) {
+      const r = rng.range(20, 60);
+      const px = rng.range(r + 20, SIZE - r - 20);
+      const py = rng.range(r + 20, SIZE - r - 20);
+      largeCraters.push([px, py, r]);
+
+      // Dark interior fill
+      const alpha = rng.range(0.08, 0.15);
+      const grd = ctx.createRadialGradient(px, py, 0, px, py, r);
+      grd.addColorStop(0, `rgba(40,35,30,${alpha})`);
+      grd.addColorStop(0.8, `rgba(35,30,25,${(alpha * 0.6).toFixed(3)})`);
+      grd.addColorStop(1, 'rgba(40,35,30,0)');
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fillStyle = grd;
+      ctx.fill();
+
+      // Bright rim highlight on upper-left edge
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(px, py, r * 0.98, Math.PI * 1.0, Math.PI * 1.8);
+      ctx.strokeStyle = `rgba(240,235,220,${rng.range(0.18, 0.32).toFixed(3)})`;
+      ctx.lineWidth = rng.range(1.5, 3.5);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Ejecta rays on the 4 largest craters (Tycho-style)
+    const biggest = largeCraters.slice().sort((a, b) => b[2] - a[2]).slice(0, 4);
+    for (const [px, py, r] of biggest) {
+      const rayCount = Math.floor(rng.range(8, 16));
+      for (let j = 0; j < rayCount; j++) {
+        const angle = rng.range(0, Math.PI * 2);
+        const len = r * rng.range(2.0, 3.2);
+        ctx.save();
+        ctx.globalAlpha = rng.range(0.04, 0.08);
+        ctx.strokeStyle = 'rgba(255,250,235,1)';
+        ctx.lineWidth = rng.range(0.8, 2.2);
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.lineTo(px + Math.cos(angle) * len, py + Math.sin(angle) * len);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // --- Small craters (70) ---
+    for (let i = 0; i < 70; i++) {
+      const r = rng.range(3, 12);
+      const px = rng.range(r + 5, SIZE - r - 5);
+      const py = rng.range(r + 5, SIZE - r - 5);
+      const alpha = rng.range(0.05, 0.14);
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(50,45,35,${alpha})`;
+      ctx.fill();
+      // Bright pixel on upper-left rim
+      ctx.beginPath();
+      ctx.arc(px - r * 0.35, py - r * 0.35, Math.max(1, r * 0.15), 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,252,240,${rng.range(0.25, 0.5).toFixed(3)})`;
+      ctx.fill();
+    }
+
+    // --- Limb darkening overlay ---
+    // Radial gradient centered on canvas: transparent at center → dark at edges
+    const moonDiscR = SIZE * 0.49; // clip moon to disc radius
+    const limbGrd = ctx.createRadialGradient(cx, cy, moonDiscR * 0.55, cx, cy, moonDiscR);
+    limbGrd.addColorStop(0, 'rgba(15,12,8,0)');
+    limbGrd.addColorStop(1, 'rgba(15,12,8,0.25)');
+    ctx.beginPath();
+    ctx.arc(cx, cy, moonDiscR, 0, Math.PI * 2);
+    ctx.fillStyle = limbGrd;
+    ctx.fill();
+
+    // Clip to disc (black outside sphere boundary, avoids square seams)
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.beginPath();
+    ctx.arc(cx, cy, moonDiscR, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,1)';
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
+/**
+ * Grayscale bump/heightfield map (512×512):
+ * brighter = higher, darker = lower/depression.
+ * Maria dips are slightly darker; crater rims are lighter; floors darker.
+ */
+function makeMoonBumpTexture(rng: Rng): THREE.CanvasTexture {
+  const SIZE = 512;
+  return makeCanvasTexture(SIZE, SIZE, (ctx) => {
+    // Neutral mid-grey highland base
+    ctx.fillStyle = '#888880';
+    ctx.fillRect(0, 0, SIZE, SIZE);
+
+    const scale = SIZE / 1024; // coordinate scale from color texture space
+
+    // Maria depressions (darker = lower elevation)
+    const maria: [number, number, number, number][] = [
+      [310 * scale, 500 * scale, 210 * scale, 220 * scale],
+      [390 * scale, 330 * scale, 155 * scale, 130 * scale],
+      [580 * scale, 360 * scale, 100 * scale, 88 * scale],
+      [610 * scale, 490 * scale, 110 * scale, 82 * scale],
+      [760 * scale, 370 * scale, 58 * scale, 46 * scale],
+      [430 * scale, 640 * scale, 90 * scale, 64 * scale],
+    ];
+    for (const [mx, my, rx, ry] of maria) {
+      const g = ctx.createRadialGradient(mx, my, 0, mx, my, Math.max(rx, ry));
+      g.addColorStop(0, 'rgba(90,88,80,0.5)');
+      g.addColorStop(0.7, 'rgba(110,108,100,0.3)');
+      g.addColorStop(1, 'rgba(136,136,128,0)');
+      ctx.save();
+      ctx.scale(rx / Math.max(rx, ry), ry / Math.max(rx, ry));
+      ctx.beginPath();
+      ctx.arc(mx / (rx / Math.max(rx, ry)), my / (ry / Math.max(rx, ry)), Math.max(rx, ry) * 1.1, 0, Math.PI * 2);
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Large crater depressions + bright rims
+    for (let i = 0; i < 15; i++) {
+      const r = rng.range(10, 30) * scale;
+      const px = rng.range(r + 10, SIZE - r - 10);
+      const py = rng.range(r + 10, SIZE - r - 10);
+      // Dark floor
+      ctx.beginPath();
+      ctx.arc(px, py, r * 0.7, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(60,58,55,0.55)';
+      ctx.fill();
+      // Bright rim ring
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(200,200,190,0.45)';
+      ctx.lineWidth = r * 0.28;
+      ctx.stroke();
+    }
+
+    // Small crater dots
+    for (let i = 0; i < 70; i++) {
+      const r = rng.range(1.5, 6) * scale;
+      const px = rng.range(r + 2, SIZE - r - 2);
+      const py = rng.range(r + 2, SIZE - r - 2);
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(80,78,72,0.35)';
+      ctx.fill();
+    }
+  });
+}
+
 function buildMoon(rng: Rng): THREE.Group {
   const group = new THREE.Group();
   group.name = 'moon';
 
-  const moonHex = '#' + COLORS.moonlight.toString(16).padStart(6, '0');
-  const craterTex = makeCanvasTexture(256, 256, (ctx) => {
-    ctx.fillStyle = moonHex;
-    ctx.fillRect(0, 0, 256, 256);
-    for (let i = 0; i < 46; i++) {
-      const cr = rng.range(4, 20);
-      const cx = rng.range(0, 256);
-      const cy = rng.range(0, 256);
-      const shade = rng.range(0.06, 0.22);
-      ctx.fillStyle = `rgba(25,22,30,${shade})`;
-      ctx.beginPath();
-      ctx.arc(cx, cy, cr, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  });
+  // --- High-resolution surface texture (1024px) ---
+  const moonTexture = makeMoonColorTexture(rng);
 
-  // C1 fix: use a dimmed warm ivory (0xb8b0a0, ~72% of moonlight) instead of pure 0xffffff.
-  // Pure white + bloom = supernova blob. COLORS.moonlight (0xf5f0e6) still too bright at t=0.85;
-  // further dimmed to 0xb8b0a0 so crater texture detail + disc edge remain visible under bloom
-  // while keeping the warm moon character. t=0.19 (About, distant moon) verified still reads well.
+  // --- Bump map (512px) for surface relief ---
+  // Fork the rng state by using a fresh stream of calls — both texture functions draw
+  // from the same seeded rng sequentially, producing deterministic results each run.
+  const bumpTexture = makeMoonBumpTexture(rng);
+
+  // --- Main sphere with MeshStandardMaterial ---
+  // emissiveIntensity 0.45 gives visible self-luminosity (readable at t=0.19 distant view)
+  // without blowing out bloom at the close finale shot (t=0.85, ~900m away).
   const sphere = new THREE.Mesh(
     new THREE.SphereGeometry(MOON_RADIUS, 48, 32),
-    new THREE.MeshBasicMaterial({ map: craterTex, color: 0xb8b0a0, fog: false })
+    new THREE.MeshStandardMaterial({
+      map: moonTexture,
+      bumpMap: bumpTexture,
+      bumpScale: 0.8,
+      roughness: 0.92,
+      metalness: 0.0,
+      emissive: new THREE.Color(COLORS.moonlight),
+      emissiveIntensity: 0.45,
+      fog: false,
+    })
   );
   sphere.position.copy(MOON_POS);
   sphere.frustumCulled = false;
   group.add(sphere);
 
-  // Calibration fix: the moon itself is allowed to stay a bright "money shot," but its
-  // additive glow sprite was wide/strong enough that UnrealBloomPass (screen-space,
-  // owned by core.ts — not tunable here) smeared it across the entire lower frame,
-  // washing the ocean into a grey sheet instead of leaving it dark around a narrow
-  // glitter streak. Shrinking + dimming the glow source starves that bloom bleed at
-  // the source without touching bloom itself or the moon's own core brightness.
+  // --- Fresnel rim effect: slightly larger back-face sphere with additive blend ---
+  // Creates a subtle bright halo around the moon's silhouette edge.
+  const rimSphere = new THREE.Mesh(
+    new THREE.SphereGeometry(MOON_RADIUS * 1.008, 48, 32),
+    new THREE.MeshBasicMaterial({
+      color: COLORS.moonlight,
+      transparent: true,
+      opacity: 0.12,
+      side: THREE.BackSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: false,
+    })
+  );
+  rimSphere.position.copy(MOON_POS);
+  rimSphere.frustumCulled = false;
+  group.add(rimSphere);
+
+  // --- Dual-layer glow sprites ---
   const glowTex = makeRadialGlowTexture();
-  // C1 fix: reduced glow opacity 0.22 → 0.14 and scale 1.35 → 1.18 so the halo is
-  // soft rather than overwhelming. Moon still reads as a bright disc with visible edge.
-  const glowMat = new THREE.SpriteMaterial({
+
+  // Inner glow: tight halo just beyond the disc
+  const innerGlowMat = new THREE.SpriteMaterial({
     map: glowTex,
     color: COLORS.moonlight,
     transparent: true,
-    opacity: 0.14,
+    opacity: 0.22,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
-    fog: false
+    fog: false,
   });
-  const glow = new THREE.Sprite(glowMat);
-  glow.position.copy(MOON_POS);
-  const glowDiameter = MOON_RADIUS * 1.18 * 2;
-  glow.scale.set(glowDiameter, glowDiameter, 1);
-  group.add(glow);
+  const innerGlow = new THREE.Sprite(innerGlowMat);
+  innerGlow.position.copy(MOON_POS);
+  const innerGlowDiameter = MOON_RADIUS * 1.15 * 2;
+  innerGlow.scale.set(innerGlowDiameter, innerGlowDiameter, 1);
+  group.add(innerGlow);
+
+  // Outer glow: wide, very dim atmospheric scatter
+  const outerGlowMat = new THREE.SpriteMaterial({
+    map: glowTex,
+    color: COLORS.moonlight,
+    transparent: true,
+    opacity: 0.08,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    fog: false,
+  });
+  const outerGlow = new THREE.Sprite(outerGlowMat);
+  outerGlow.position.copy(MOON_POS);
+  const outerGlowDiameter = MOON_RADIUS * 1.7 * 2;
+  outerGlow.scale.set(outerGlowDiameter, outerGlowDiameter, 1);
+  group.add(outerGlow);
 
   return group;
 }
