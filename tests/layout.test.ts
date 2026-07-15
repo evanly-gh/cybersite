@@ -41,10 +41,12 @@ describe('computeCityLayout (pure data)', () => {
   it('has a reasonable number of buildings across all zones', () => {
     expect(layout.buildings.length).toBeGreaterThan(40);
     const zones = new Set(layout.buildings.map((b) => b.zone));
-    expect(zones.has('aboutWall')).toBe(true);
+    // About wall was split into near/far segments; research section is now a
+    // ground-level canyon (was skywayFlank).
+    expect(zones.has('aboutWallNear') || zones.has('aboutWallFar')).toBe(true);
     expect(zones.has('projectsWall')).toBe(true);
     expect(zones.has('shibuya')).toBe(true);
-    expect(zones.has('skywayFlank')).toBe(true);
+    expect(zones.has('researchCanyon')).toBe(true);
   });
 
   it('places exactly one monolith, radio mast, monument, restaurant, bar, and two ramen shops', () => {
