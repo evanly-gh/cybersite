@@ -168,6 +168,39 @@ export function buildGasStation(rng: Rng): THREE.Group {
     }
   }
 
+  // Task E: bollards (4 yellow-ish short cylinders around the pump island)
+  const bollardGeom = new THREE.CylinderGeometry(0.15, 0.15, 0.8, 10);
+  const bollardPositions: Array<[number, number]> = [
+    [-5.2, -4.2], [5.2, -4.2], [-5.2, 4.2], [5.2, 4.2]
+  ];
+  for (const [bx, bz] of bollardPositions) {
+    amber.push({ geom: bollardGeom, matrix: new THREE.Matrix4().setPosition(bx, 0.4, bz), mat: 0 });
+  }
+
+  // Task E: oil stain elliptical decals near pumps
+  for (let i = 0; i < 3; i++) {
+    const oilX = rng.range(-3.5, 3.5);
+    const oilZ = rng.range(-2.8, 2.8);
+    const oilW = rng.range(1.0, 2.2);
+    const oilD = rng.range(0.5, 1.2);
+    const oilMesh = new THREE.Mesh(
+      new THREE.CircleGeometry(1, 16),
+      new THREE.MeshStandardMaterial({
+        color: 0x050508,
+        transparent: true,
+        opacity: 0.82,
+        roughness: 0.1,
+        metalness: 0.05,
+        depthWrite: false
+      })
+    );
+    oilMesh.rotation.x = -Math.PI / 2;
+    oilMesh.scale.set(oilW, oilD, 1);
+    oilMesh.position.set(oilX, 0.06, oilZ);
+    oilMesh.name = `oilSpot${i}`;
+    group.add(oilMesh);
+  }
+
   // --- price sign tower at the forecourt corner ---
   const signX = slabW / 2 - 1.2;
   const signZ = -slabD / 2 + 1.2;
@@ -221,7 +254,7 @@ export function buildGasStation(rng: Rng): THREE.Group {
       new THREE.MeshStandardMaterial({
         color: COLORS.moonlight,
         emissive: COLORS.moonlight,
-        emissiveIntensity: 2.6,
+        emissiveIntensity: 2.5, // Task E: brighter canopy underside (spec: 2.5)
         roughness: 1,
         metalness: 0
       }),

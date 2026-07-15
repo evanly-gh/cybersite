@@ -9,7 +9,10 @@ import {
   buildSteamVent,
   buildVendingMachine,
   buildHydrant,
-  buildTrashHeap
+  buildTrashHeap,
+  buildDumpster,
+  buildConcreteBarrier,
+  buildPhoneBooth
 } from '../../assets/props/streetProps';
 
 /**
@@ -32,6 +35,9 @@ registerAsset('steamVent', (rng) => buildSteamVent(rng));
 registerAsset('vendingMachine', (rng) => buildVendingMachine(rng));
 registerAsset('hydrant', (rng) => buildHydrant(rng));
 registerAsset('trashHeap', (rng) => buildTrashHeap(rng));
+registerAsset('dumpster', (rng) => buildDumpster(rng));
+registerAsset('concreteBarrier', (rng) => buildConcreteBarrier(rng));
+registerAsset('phoneBooth', (rng) => buildPhoneBooth(rng));
 
 /**
  * The whole street-furniture kit arranged over a ~30x18m yard so a single turntable
@@ -91,6 +97,20 @@ registerAsset('propYard', (rng) => {
   const trash = buildTrashHeap(rng);
   trash.position.set(9, 0, 1);
   group.add(trash);
+
+  // Task E: new props in a second row
+  const dumpster = buildDumpster(rng);
+  dumpster.position.set(-10, 0, 10);
+  group.add(dumpster);
+
+  const barrier = buildConcreteBarrier(rng);
+  barrier.position.set(0, 0, 10);
+  group.add(barrier);
+
+  const phoneBooth = buildPhoneBooth(rng);
+  phoneBooth.position.set(8, 0, 10);
+  phoneBooth.rotation.y = -0.4;
+  group.add(phoneBooth);
 
   // one unlucky flickering lamp (spec: dying sodium tube)
   const unlucky = rng.pick(lamps);
