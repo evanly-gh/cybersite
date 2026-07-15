@@ -69,6 +69,32 @@ export async function preloadModels(urls: string[]): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// tryLoadScene
+// ---------------------------------------------------------------------------
+
+/**
+ * Loads a .glb / .gltf and returns a cloned scene, or `null` if the file is
+ * absent / fails to load. Unlike `loadModel` (which returns a magenta fallback
+ * box), this lets callers detect availability and fall back to their own
+ * procedural geometry. Uses the SAME DRACO-configured singleton loader, so
+ * DRACO-compressed models (common in CC0 kits) decode correctly.
+ */
+export async function tryLoadScene(url: string): Promise<THREE.Group | null> {
+  if (!cache.has(url)) {
+    const promise = new Promise<GLTF>((resolve, reject) => {
+      gltfLoader.load(url, (gltf) => resolve(gltf), undefined, (err) => reject(err));
+    });
+    cache.set(url, promise);
+  }
+  try {
+    const gltf = await cache.get(url)!;
+    return gltf.scene.clone(true) as THREE.Group;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // mergeModelMeshes
 // ---------------------------------------------------------------------------
 

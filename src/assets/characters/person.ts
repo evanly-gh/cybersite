@@ -562,27 +562,10 @@ export function buildPerson(rng: Rng, pose: PersonPose): PersonAsset {
   // We can't split within M.body, so we keep hair at body color and treat the
   // hair as a helmet-like cap — which reads fine at distance. For vivid-dye hair
   // the hair color overrides the body material emissive on next frame if needed.
-  // (Simple approach: hair shares body mat, distinct hair tone via a separate
-  // hair material is only added when the hair color differs significantly.)
-  const hairDiffuse = hairColor.clone();
-  const hairMat = new THREE.MeshStandardMaterial({
-    color: hairDiffuse,
-    roughness: 0.85,
-    metalness: 0.0,
-    emissive: hairDiffuse,
-    emissiveIntensity: hairVariant !== 'bare' ? 0.15 : 0.0
-  });
-  // We'll use hairMat as group 3 (M.hair). This adds 1 more draw call (4 total),
-  // but only when hair is present (not 'bare'). Brief allows up to 3 draw calls —
-  // we'll merge hair into M.body group to stay within 3 draw calls. The hairMat
-  // is defined but not used as a separate material group; instead, hair geometry
-  // is assigned M.body and the body color implicitly applies (slight simplification:
-  // hair reads as a darker cap over the body color, which is acceptable at distance).
-  // For vivid-dye cases (neon hair), we want the hair to glow distinctly.
-  // Solution: assign hair geometry to M.accent if the hair color is a vivid NEON,
-  // otherwise M.body. This is handled in addHairVariant via the mat field.
-  // NOTE: hairMat is disposed and not passed to the mesh — we stay at 3 draw calls.
-  hairMat.dispose();
+  // Hair shares an existing material group to stay within the 3-draw-call budget:
+  // normal hair rides M.body (reads as a darker cap at distance); vivid-dye/neon hair
+  // rides M.accent so it glows. The choice is made per-part in addHairVariant via its
+  // `mat` field — no separate hair material is allocated.
 
   const bones = makeBones();
   const geom = mergeParts(parts, true);

@@ -182,7 +182,7 @@ export interface CityLayoutData {
 // the mesh-assembly layer. The real builders' rng-driven sizes vary a few % around
 // these — absorbed by the block gaps below, never causing a visible clash.
 export const FILLER_FOOTPRINT: Record<FillerKind, [number, number]> = {
-  tallStepped: [27, 27],
+  tallStepped: [30, 30],
   tallSlab: [40, 16],
   apartment: [22, 14],
   officeHolo: [26, 18],
@@ -543,7 +543,7 @@ export function computeCityLayout(seed: number): CityLayoutData {
     ['storefrontRow', 0.08]
   ];
   // researchCanyon (BOTH sides of x=240, z -420..-800): the key new spatial experience —
-  // TALL towers placed CLOSE (CANYON_SETBACK=8) so a low camera looking up sees an
+  // TALL towers placed CLOSE (CANYON_SETBACK=11, road-clearance-clamped) so a low camera looking up sees an
   // enclosed neon corridor. Only tall kinds (50-120m) here.
   const canyonWeights: Array<[FillerKind, number]> = [
     ['tallSlab', 0.28],

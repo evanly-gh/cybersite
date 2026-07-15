@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { tryLoadScene } from '../gltfLoader';
 import { COLORS } from '../../theme';
 import type { Rng } from '../../utils/rng';
 import type { GeometryPart } from '../../utils/merge';
@@ -89,24 +89,19 @@ function makeEmptyModel(url: string): GltfModel {
  *   const building = gltfCyberpunkTower(lib, rng);
  */
 export async function loadGltfModels(basePath = '/models/'): Promise<GltfLibrary> {
-  const loader = new GLTFLoader();
-
   async function tryLoad(filename: string): Promise<GltfModel> {
     const url = basePath + filename;
-    try {
-      const gltf = await loader.loadAsync(url);
-      // Traverse and make all meshes cast+receive shadows for consistency.
-      gltf.scene.traverse((obj) => {
-        if (obj instanceof THREE.Mesh) {
-          obj.castShadow = true;
-          obj.receiveShadow = true;
-        }
-      });
-      return { scene: gltf.scene, url, available: true };
-    } catch {
-      // File not found, network error, parse failure — all silently ignored.
-      return makeEmptyModel(url);
-    }
+    // tryLoadScene uses the shared DRACO-configured loader, so DRACO-compressed
+    // CC0 kits decode correctly; returns null on absent/failed load.
+    const scene = await tryLoadScene(url);
+    if (!scene) return makeEmptyModel(url);
+    scene.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        obj.castShadow = true;
+        obj.receiveShadow = true;
+      }
+    });
+    return { scene, url, available: true };
   }
 
   const [cyberpunkTower, commercialBlock, industrialUnit, residentialTower] = await Promise.all([
