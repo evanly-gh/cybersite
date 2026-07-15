@@ -549,9 +549,9 @@ function buildBoulevard(): { road: GeometryPart[]; curb: GeometryPart[]; marking
   // left a 10m hole in the drivable surface between the plaza and the first road segment.
   // Exact abutment at z = -20 (no overlap), so there's no double-stacked z-fight either.
   const zTop = -PLAZA_SIZE / 2;
-  const zBottom = WAYPOINTS.skywayStart.z; // -420
+  const zBottom = WAYPOINTS.researchEntry.z; // -420
 
-  // Flat segments between plaza edge / ramp1 / ramp2 / skywayStart, skipping the wedge + gap zones.
+  // Flat segments between plaza edge / ramp1 / ramp2 / researchEntry, skipping the wedge + gap zones.
   const segments: Array<[number, number]> = [
     [zTop, RAMPS[0].base.z],
     [RAMPS[0].land.z - RAMP_LEN, RAMPS[1].base.z],
@@ -648,7 +648,7 @@ function buildSkyway(): {
   structure: GeometryPart[];
   cyan: GeometryPart[];
 } {
-  const frames = sampleFrames(ROUTE_U.skywayStart, ROUTE_U.skywayEnd, 40);
+  const frames = sampleFrames(ROUTE_U.researchEntry, ROUTE_U.researchEnd, 40);
   const road = deckParts(frames, SKYWAY_HALF_W, SKYWAY_HALF_W, DECK_THICKNESS);
   const structure = [
     ...railParts(frames, SKYWAY_HALF_W, RAIL_H),
@@ -659,7 +659,7 @@ function buildSkyway(): {
 }
 
 function buildConnector(): { road: GeometryPart[]; structure: GeometryPart[]; cyan: GeometryPart[] } {
-  const frames = sampleFrames(ROUTE_U.skywayEnd, ROUTE_U.bridgeStart, 10);
+  const frames = sampleFrames(ROUTE_U.researchEnd, ROUTE_U.bridgeStart, 10);
   const road = deckParts(frames, SKYWAY_HALF_W, BRIDGE_HALF_W, DECK_THICKNESS);
   const structure = [
     ...railParts(frames, SKYWAY_HALF_W, RAIL_H),

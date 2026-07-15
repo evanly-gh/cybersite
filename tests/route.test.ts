@@ -15,9 +15,20 @@ describe('route', () => {
     expect(p.distanceTo(target)).toBeLessThanOrEqual(8);
   });
 
-  it('y at skywayEnd u is within 1m of 28', () => {
-    const p = ROUTE.getPointAt(ROUTE_U.skywayEnd);
-    expect(Math.abs(p.y - 28)).toBeLessThanOrEqual(1);
+  it('y at researchEnd u is within 1m of 0', () => {
+    const p = ROUTE.getPointAt(ROUTE_U.researchEnd);
+    expect(Math.abs(p.y - 0)).toBeLessThanOrEqual(1);
+  });
+
+  it('y at bridgeStart u is within 1m of 14', () => {
+    const p = ROUTE.getPointAt(ROUTE_U.bridgeStart);
+    expect(Math.abs(p.y - 14)).toBeLessThanOrEqual(1);
+  });
+
+  it('researchEntry sample point lands within 8m of (240, 0, -420)', () => {
+    const p = ROUTE.getPointAt(ROUTE_U.researchEntry);
+    const target = new THREE.Vector3(240, 0, -420);
+    expect(p.distanceTo(target)).toBeLessThanOrEqual(8);
   });
 
   it('roadFrame binormal is unit-length and perpendicular to tangent across 20 sampled u', () => {

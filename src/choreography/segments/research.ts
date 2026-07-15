@@ -2,8 +2,8 @@
  * Task 29 — Research segment (t 0.62 – 0.79)
  *
  * ARCHITECTURE:
- *  - Elevated skyway section. The bike climbs from skywayStart (240,0,-420) up to
- *    skywayTop (240,28,-520) and continues along the elevated platform.
+ *  - Ground-level research canyon. The bike rides from researchEntry (240,0,-420)
+ *    through researchMid (240,0,-600) to researchEnd (240,0,-800).
  *  - Camera LEADS the bike: positioned 9m ahead (more-negative Z), 2.5m above bike,
  *    looking BACK toward the biker. Biker stays centered frame.
  *  - 2 large sky holo-panels (landscape 1280×720) floating on both skyway flanks.
@@ -48,7 +48,7 @@
  *
  * SPEED KEYS:
  *  Gentle constant u-rate: t 0.62→0.79 advances u by 65% of skyway length.
- *  Projects registered { t:0.62, u: ROUTE_U.skywayStart }; we add { t:0.79, ... }.
+ *  Projects registered { t:0.62, u: ROUTE_U.researchEntry }; we add { t:0.79, ... }.
  */
 
 import * as THREE from 'three';
@@ -328,9 +328,9 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
 
   // ---- Step 1: Speed keys ----
   // Gentle constant u-rate through t 0.62–0.79.
-  // Projects ended with { t:0.62, u: ROUTE_U.skywayStart }; we share that boundary.
-  const uStart = ROUTE_U.skywayStart;
-  const uEnd   = ROUTE_U.skywayEnd;
+  // Projects ended with { t:0.62, u: ROUTE_U.researchEntry }; we share that boundary.
+  const uStart = ROUTE_U.researchEntry;
+  const uEnd   = ROUTE_U.researchEnd;
   // 65% of skyway span by t=0.79 (unhurried, leaves headroom for finale)
   const uAt79  = uStart + 0.65 * (uEnd - uStart);
 
