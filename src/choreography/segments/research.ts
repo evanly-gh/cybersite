@@ -1,54 +1,53 @@
 /**
- * Task 29 — Research segment (t 0.62 – 0.79)
+ * Task I — Research segment (t 0.62 – 0.79)
  *
- * ARCHITECTURE:
- *  - Ground-level research canyon. The bike rides from researchEntry (240,0,-420)
- *    through researchMid (240,0,-600) to researchEnd (240,0,-800).
- *  - Camera LEADS the bike: positioned 9m ahead (more-negative Z), 2.5m above bike,
- *    looking BACK toward the biker. Biker stays centered frame.
- *  - 2 large sky holo-panels (landscape 1280×720) floating on both skyway flanks.
- *  - 2 small garnish holos (coordinate readout + eyebrow label).
- *  - Panels face -Z (back toward camera), Y-billboard.
- *  - Ambient: panels bob ±0.3m on a slow sine (wall-clock).
+ * ARCHITECTURE — GROUND-LEVEL NEON CANYON (rewritten from the old elevated skyway):
+ *  - The bike rides at ground level (y=0) from researchEntry (240,0,-420) through
+ *    researchMid (240,0,-600) toward researchEnd (240,0,-800). At frac=0.65 (see below)
+ *    the bike covers z=-420 → ~-667 across t 0.62→0.79.
+ *  - Camera is LOW to the ground (y≈2m) and TRAILS the bike by ~9m, looking sharply
+ *    UPWARD (look target y≈17m) at the towering canyon walls and the research holo-panels
+ *    mounted high on them. The biker sits low in-frame; towers loom overhead.
+ *  - This is the OPPOSITE of the old shot (which was elevated, leading, looking down/back).
  *
- * CAMERA GEOMETRY:
- *  Route on skyway: tangent ≈ (0, 0.27, -0.96) (climbing then level at y=28).
- *  Camera 9m ahead along tangent = bikePos + tangent*9 + (0,2.5,0).
- *  Camera z ≈ z_bike - 8.7, y ≈ y_bike + 4.9 (during climb) or y_bike + 2.5 (level).
- *  Camera looks at bikePos (in +Z direction from camera).
+ * CAMERA GEOMETRY (pure f(t), scrub-safe):
+ *  u(t)   = uStart + (t-0.62)/0.17 * (uAt79 - uStart)          [frac=0.65 span]
+ *  bike   = roadFrame(u).pos
+ *  camPos = (240, CAM_Y=2.0, bike.z + CAM_BEHIND=9)            [absolute low y, on road x]
+ *  look   = (240, LOOK_Y=17, camPos.z - LOOK_AHEAD=38)         [aimed UP the canyon]
+ *  fov    = 70                                                  [wide, canyon-immersive]
+ *  Camera x is pinned to 240 (road center, within the required [238,242] no-clip band).
  *
- * PANEL PLACEMENT + VISIBILITY:
- *  Panels are visible AFTER the lead camera passes them (panel enters +Z half-space).
- *  Camera passes panel at z_p when z_bike ≈ z_p + 9 (cam at z_p, panel at z_p → in view).
+ *  IMPORTANT — speed handoff constraint: the finale segment hardcodes its t=0.79 boundary
+ *  as u = researchEntry + 0.65*(researchEnd - researchEntry). We MUST keep frac=0.65 here
+ *  so the bike position is continuous across the research→finale handoff.
  *
- *  researchSky anchors (Task 20):
- *    [0]: (240, 32, -477) rotY=0
- *    [1]: (240, 32, -572) rotY=0
- *    [2]: (240, 32, -667) rotY=0
- *    [3]: (240, 32, -762) rotY=0
+ * RESEARCH HOLO-PANEL ANCHORS (cityLayout.ts researchCanyon — high on the canyon walls,
+ * already yaw-oriented to face the road via rotY=±π/2):
+ *    [0]: (233, 24, -480) rotY=+π/2  (west wall, faces +X toward road)
+ *    [1]: (247, 26, -560) rotY=-π/2  (east wall, faces -X toward road)
+ *    [2]: (233, 22, -650) rotY=+π/2  (west wall)
+ *    [3]: (247, 28, -730) rotY=-π/2  (east wall)
  *
- *  Panel 1 (left/boulevard, z=-477):  anchor[0], dx=-8 → world (232,28,-477)
- *    Camera passes: z_bike ≈ -468 → t ≈ 0.655
- *    Fade window: t 0.64 → 0.73 (in view ~0.09 t; ≥0.05 ✓)
- *
- *  Panel 2 (right/buildings, z=-572):  anchor[1], dx=+8 → world (248,28,-572)
- *    Camera passes: z_bike ≈ -563 → t ≈ 0.736
- *    Fade window: t 0.72 → 0.79 (in view ~0.07 t; ≥0.05 ✓)
- *
- *  Garnish 1 (left, z=-477): anchor[0], dx=-8, dy=+5 → world (232,37,-477)
- *    Same fade window as Panel 1.
- *
- *  Garnish 2 (right, z=-572): anchor[1], dx=+8, dy=+5 → world (248,37,-572)
- *    Same fade window as Panel 2.
+ *  Content mapping (best full-frame legibility windows land on the middle anchors):
+ *    anchor[0] → Garnish A (coordinate readout, RESEARCH 01)   reads first, t≈0.62-0.66
+ *    anchor[1] → Panel 1   (RESUME.research[0], Mobile Intel)  reads t≈0.645-0.705 (center)
+ *    anchor[2] → Panel 2   (RESUME.research[1], LLM HW Bench)  reads t≈0.70-0.76 (center)
+ *    anchor[3] → Garnish B (coordinate readout, RESEARCH 02)   reads last, t≈0.73-0.79
  *
  * PANEL ORIENTATION:
- *  Wall-mount screen faces +Z in billboard-local. We want panels to face world -Z
- *  (so camera in -Z half-space beyond the panel can see them). rotY = Math.PI maps
- *  billboard-local +Z → world -Z. Both panels use rotY=π regardless of which side.
+ *  The anchors already yaw the panels to face the road. On top of that we add a fixed
+ *  DOWNWARD pitch (rotation.x = DOWN_TILT ≈ 38°) so each screen leans DOWN toward the low
+ *  camera and its text reads clearly from below. No dynamic billboarding — canyon walls
+ *  don't move, so a fixed orientation is correct and cheaper.
+ *
+ * FADE TIMING:
+ *  Recomputed for the new low camera. Each panel fades in as it enters frame ahead of the
+ *  camera and fades out as the camera slides beneath it (panel rises out the top). The
+ *  five verification t's (0.62/0.66/0.70/0.74/0.78) each hit at least one full-alpha panel.
  *
  * SPEED KEYS:
- *  Gentle constant u-rate: t 0.62→0.79 advances u by 65% of skyway length.
- *  Projects registered { t:0.62, u: ROUTE_U.researchEntry }; we add { t:0.79, ... }.
+ *  Gentle constant u-rate: t 0.62→0.79 advances u by 65% of the canyon length.
  */
 
 import * as THREE from 'three';
@@ -63,6 +62,22 @@ import { COLORS } from '../../theme';
 import { buildBillboard } from '../../assets/billboards/billboards';
 
 // ---------------------------------------------------------------------------
+// Camera model constants (low-to-ground, looking UP the canyon)
+// ---------------------------------------------------------------------------
+
+const T_START = 0.62;
+const T_END = 0.79;
+const SEG_LEN = T_END - T_START;
+
+const CAM_X = 240;        // pinned to road center (within required [238,242] no-clip band)
+const CAM_Y = 2.0;        // low to the ground (design 1.2–2.5m)
+const CAM_BEHIND = 9;     // camera trails the bike by 9m (camZ = bikeZ + 9)
+const LOOK_Y = 17;        // look target height — aims UP at towers/panels (design 15–28m)
+const LOOK_AHEAD = 38;    // look point is 38m further up-canyon (lookZ = camZ - 38)
+const CAM_FOV = 70;       // wide, canyon-immersive (design 64–72)
+const DOWN_TILT = 38 * (Math.PI / 180); // panel forward-lean toward the low camera
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -74,22 +89,10 @@ function easeInOutQuad(x: number): number {
   return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
 }
 
-/**
- * Computes camera world position at scroll parameter t using the same lead-follow
- * formula as the camera keys: 9m along route tangent ahead of the bike + 2.5m up
- * (plus the climb-phase extra offset). Pure f(t) — no state, scrub-safe.
- */
-function camPosAtT(t: number, uStart: number, uAt79: number): THREE.Vector3 {
-  const SEG_LEN = 0.79 - 0.62;
-  const frac = THREE.MathUtils.clamp((t - 0.62) / SEG_LEN, 0, 1);
-  const u = THREE.MathUtils.clamp(uStart + frac * (uAt79 - uStart), 0, 1);
-  const frame = roadFrame(u);
-  const bikePos = frame.pos.clone();
-  const tangent = frame.tangent.clone().normalize();
-  const climbExtra = Math.max(0, 1 - (t - 0.62) / 0.08) * 4.0;
-  return bikePos.clone()
-    .addScaledVector(tangent, 9.0)
-    .add(new THREE.Vector3(0, 2.5 + climbExtra, 0));
+/** Bike arc-length parameter u at scroll t. Pure f(t). */
+function bikeUAtT(t: number, uStart: number, uAt79: number): number {
+  const frac = THREE.MathUtils.clamp((t - T_START) / SEG_LEN, 0, 1);
+  return THREE.MathUtils.clamp(uStart + frac * (uAt79 - uStart), 0, 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -99,7 +102,6 @@ function camPosAtT(t: number, uStart: number, uAt79: number): THREE.Vector3 {
 /**
  * Large landscape research panel (1280×720).
  * Eyebrow ≥28px, body ≥28px for legibility.
- * ~70 words body text from RESUME.research[].
  */
 function drawResearchPanelTexture(
   index: 'RESEARCH 01' | 'RESEARCH 02',
@@ -112,8 +114,12 @@ function drawResearchPanelTexture(
   return makeCanvasTexture(W, H, (ctx) => {
     const accent = hex(COLORS.holoTeal);
 
-    // Background
-    ctx.fillStyle = '#06101efc';
+    // Background — lit holo teal-navy (brighter than the old near-black so the panel
+    // reads as an illuminated screen against the city's bright ad grids, not a dark slab).
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#123043');
+    bg.addColorStop(1, '#0a1c2b');
+    ctx.fillStyle = bg;
     ctx.fillRect(0, 0, W, H);
 
     // Outer border
@@ -190,9 +196,9 @@ function drawResearchPanelTexture(
     ctx.moveTo(pad, y - 10); ctx.lineTo(W - pad, y - 10);
     ctx.stroke();
 
-    // Body — 30px Rajdhani, ~46 chars/line at W-2*pad wide
+    // Body — 30px Rajdhani
     ctx.font = '30px "Rajdhani"';
-    ctx.fillStyle = '#b8dcd6';
+    ctx.fillStyle = '#e4f5f0';
     ctx.letterSpacing = '0px';
     const contentWidth = W - pad * 2;
     const lines = wrapText(ctx, body, contentWidth);
@@ -214,7 +220,7 @@ function drawGarnishTexture(label: string, coordLine: string): THREE.CanvasTextu
   return makeCanvasTexture(W, H, (ctx) => {
     const accent = hex(COLORS.holoTeal);
 
-    ctx.fillStyle = '#07101ecc';
+    ctx.fillStyle = '#123043';
     ctx.fillRect(0, 0, W, H);
 
     ctx.strokeStyle = accent;
@@ -329,58 +335,34 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
   // ---- Step 1: Speed keys ----
   // Gentle constant u-rate through t 0.62–0.79.
   // Projects ended with { t:0.62, u: ROUTE_U.researchEntry }; we share that boundary.
+  // frac MUST stay 0.65 — the finale segment hardcodes the same value for its handoff.
   const uStart = ROUTE_U.researchEntry;
   const uEnd   = ROUTE_U.researchEnd;
-  // 65% of skyway span by t=0.79 (unhurried, leaves headroom for finale)
   const uAt79  = uStart + 0.65 * (uEnd - uStart);
 
   bike.addSpeedKeys([
-    { t: 0.62, u: uStart },
-    { t: 0.79, u: uAt79  }
+    { t: T_START, u: uStart },
+    { t: T_END,   u: uAt79  }
   ]);
 
-  // ---- Step 2: Camera keys ----
-  // Lead-follow approximated by static keys every 0.02–0.03 t.
-  // At each key t:
-  //   u(t) = lerp(uStart, uAt79, (t-0.62)/0.17)
-  //   frame = roadFrame(u)
-  //   tangent = frame.tangent (normalized, points in travel direction = -Z dominant on skyway)
-  //   camPos = frame.pos + tangent*9 + (0, 2.5, 0)
-  //   camLook = frame.pos   (bike position)
-  //
-  // "9m AHEAD" = 9m further along the tangent direction (more negative Z).
-  // Camera looks back at bike (camera is in front, looks in +Z from bike's frame).
-
-  const SEG_LEN = 0.79 - 0.62;
+  // ---- Step 2: Camera keys (low, trailing, looking UP the canyon) ----
   const T_KEYS = [0.62, 0.64, 0.66, 0.68, 0.70, 0.72, 0.74, 0.76, 0.78, 0.79];
 
   type CamKey = { t: number; pos: THREE.Vector3; look: THREE.Vector3 };
-  const camKeys: CamKey[] = [];
-
-  for (const tKey of T_KEYS) {
-    const frac = (tKey - 0.62) / SEG_LEN;
-    const u = uStart + frac * (uAt79 - uStart);
-    const frame = roadFrame(Math.max(0, Math.min(1, u)));
-
-    const bikePos = frame.pos.clone();
-    // tangent is the route travel direction (roughly -Z on skyway, with upward component during climb)
-    const tangent = frame.tangent.clone().normalize();
-
-    // Camera 9m further along route (ahead of bike) + 2.5m above bike height.
-    // During the climb phase (t 0.62–0.68), add extra height to avoid clipping
-    // through the ramp geometry: the skyway rises from y=0 to y=28 over ~100m.
-    // Extra upward offset: smoothly blends from +4m (at t=0.62) to 0m (at t=0.70).
-    const climbExtra = Math.max(0, 1 - (tKey - 0.62) / 0.08) * 4.0;
-    const camPos = bikePos.clone()
-      .addScaledVector(tangent, 9.0)
-      .add(new THREE.Vector3(0, 2.5 + climbExtra, 0));
-
-    camKeys.push({ t: tKey, pos: camPos, look: bikePos.clone() });
-  }
+  const camKeys: CamKey[] = T_KEYS.map((tKey) => {
+    const u = bikeUAtT(tKey, uStart, uAt79);
+    const bikePos = roadFrame(u).pos;
+    // Camera: low, pinned to road center, trailing the bike by CAM_BEHIND.
+    const camZ = bikePos.z + CAM_BEHIND;
+    const pos = new THREE.Vector3(CAM_X, CAM_Y, camZ);
+    // Look target: high above and up-canyon → the lens tilts UP at towers + panels.
+    const look = new THREE.Vector3(CAM_X, LOOK_Y, camZ - LOOK_AHEAD);
+    return { t: tKey, pos, look };
+  });
 
   rig.addKeys(camKeys.map((k, i) => ({
     t: k.t,
-    pose: { pos: k.pos, look: k.look, fov: 55, roll: 0 },
+    pose: { pos: k.pos, look: k.look, fov: CAM_FOV, roll: 0 },
     ease: i === 0 ? easeInOutQuad : undefined
   })));
 
@@ -391,7 +373,7 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
 
   const rng = makeRng(1337 + 29);
 
-  // ---- Panel textures ----
+  // ---- Panel + garnish textures ----
   const panel1Tex = drawResearchPanelTexture(
     'RESEARCH 01',
     RESUME.research[0].title,
@@ -404,131 +386,94 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
     RESUME.research[1].stack,
     RESUME.research[1].blurb
   );
-  const garnish1Tex = drawGarnishTexture('RESEARCH 01', 'X:220  Y:34  Z:-477  // UW MOB.INT.LAB');
-  const garnish2Tex = drawGarnishTexture('RESEARCH 02', 'X:260  Y:34  Z:-572  // LLM HW BENCH');
+  const garnishATex = drawGarnishTexture('LAB NODE', 'X:233  Y:22  Z:-650  // UW MOB.INT.LAB');
+  const garnishBTex = drawGarnishTexture('BENCH NODE', 'X:247  Y:28  Z:-730  // LLM HW BENCH');
 
-  // ---- Billboard panels (landscape 1280×720, widthM=16m, h≈9m) — I2 fix: larger panels ----
-  const bbPanel1 = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: 16, texture: panel1Tex });
-  const bbPanel2 = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: 16, texture: panel2Tex });
-
-  // Small garnish holos (landscape format, 5m wide)
-  const bbGarnish1 = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: 5, texture: garnish1Tex });
-  const bbGarnish2 = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: 5, texture: garnish2Tex });
+  // ---- Billboards (landscape). Panels 16m wide (h≈9m); garnishes 6m. ----
+  const PANEL_W = 16;
+  const panelH = PANEL_W * (720 / 1280); // ≈7.9m
+  const bbPanel1  = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: PANEL_W, texture: panel1Tex });
+  const bbPanel2  = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: PANEL_W, texture: panel2Tex });
+  const bbGarnishA = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: 6, texture: garnishATex });
+  const bbGarnishB = buildBillboard(rng, { format: 'landscape', mount: 'wall', widthM: 6, texture: garnishBTex });
 
   // ---- Anchor parenting ----
-  // Anchors have rotY=0 so anchor-local offsets map directly to world offsets.
+  // The researchCanyon anchors already yaw each panel to face the road (rotY=±π/2).
+  // We add ONLY a fixed downward pitch (rotation.x = DOWN_TILT) so the screen leans DOWN
+  // toward the low camera. A small local -y offset drops the panel center into the readable
+  // band while it still towers overhead. World center Y = anchorY + localY (yaw is about Y,
+  // so the local Y offset maps straight to world Y).
   //
-  // Panel orientation: wall-mount screen faces +Z in billboard-local.
-  // We want both panels to face world -Z (so lead camera at z_cam < z_panel sees them,
-  // i.e., panel is in the camera's +Z view direction after camera passes it).
-  // rotY = π rotates billboard-local +Z → world -Z ✓
-  //
-  // Lateral offset: ±8m from center so panels stay within fov=55° (half-fov=27.5°).
-  // At depth D from camera, visible half-width = D*tan(27.5°) ≈ D*0.52.
-  // At D=30m (typical panel-to-camera separation): half-width ≈ 15.6m → ±8m fits easily.
-  //
-  // Panel height: anchor y=32, we offset dy=-4 so panels sit at world y≈28 (biker level).
-  // Garnishes at dy=+5 (world y≈37) above main panels.
-  //
-  // Left side: dx=-8 → world x=232 (slight boulevard lean)
-  // Right side: dx=+8 → world x=248 (slight buildings lean)
+  // Content is placed on the anchors the camera actually reaches for a close read (bike
+  // stops at z≈-658 with frac=0.65). The two big panels get the earliest, most central
+  // read windows; the two garnishes book-end the run.
+  //   index 0 (west, z=-480) → Panel 1   (RESUME.research[0])  read t≈0.62-0.66
+  //   index 1 (east, z=-560) → Panel 2   (RESUME.research[1])  read t≈0.66-0.71
+  //   index 2 (west, z=-650) → Garnish A                       read t≈0.74-0.78
+  //   index 3 (east, z=-730) → Garnish B                       read t≈0.78-0.79 (far tail)
 
-  // I2 fix (Pass 2): Reduce lateral offset from ±8m to ±2m so panels are nearly
-  // centered in the leading camera view. The camera leads the biker at x≈240 along
-  // x≈240, looking back at the biker (biker also at x≈240). Panels at x=238 and x=242
-  // (dx=-2 and dx=+2) are only 2m off the camera's look center-line → angle at D=30m
-  // is atan(2/30)≈3.8° (vs 15.1° at dx=8m, D=30m). Both panels will be very close
-  // to screen center, fully readable for many consecutive t-frames.
-  //
-  // Also increase panel width from 13m to 16m (h=16*720/1280≈9m) to fill more of the
-  // FOV=55° frame at the typical 40-60m lead distance.
-  //
-  // Panel yaw (rotY=π) is overridden by the Y-billboard update() logic anyway, so
-  // the static rotation is just a starting default.
+  // Local +z under each anchor points toward the road (west rotY=+π/2 → +x; east
+  // rotY=-π/2 → -x; both toward x=240). A +z offset floats the panel OFF the wall,
+  // out over the canyon, so it reads as a free-floating research holo-panel distinct
+  // from the building ad-grids behind it.
+  const PANEL_FLOAT = 4.5;
+  const GARNISH_FLOAT = 3.0;
 
-  // I2 fix (Pass 2, final): Panels at y=20 for panel1 (camera at y≈23 during skyway
-  // climb at z=-477; camera looks steeply down at biker y≈16, so panel at y=20 appears
-  // in the UPPER portion of frame — confirmed by earlier test shot at t=0.66 showing
-  // "Model compression..." text filling the frame). Panel2 at y=24 (flat skyway y≈28).
-  // Both panels ±2m lateral for near-center framing. widthM=16 (h≈9m).
-  const panelH = 16 * (720 / 1280); // ≈9m
-
-  // --- Panel 1: anchor[0] (z=-477) ---
+  // Panel 1 — anchor[0]
   const panelGroup1 = new THREE.Group();
   panelGroup1.name = 'researchPanel1';
-  panelGroup1.position.set(-2, -12, 0);  // world x=238, y=20 (32-12)
-  panelGroup1.rotation.y = Math.PI;
+  panelGroup1.position.set(0, -3, PANEL_FLOAT);
+  panelGroup1.rotation.x = DOWN_TILT;
   anchors.researchCanyon[0].add(panelGroup1);
-
-  const { group: truss1, thrusters: thrusters1 } = buildFloatingTruss(16, panelH);
+  const { group: truss1, thrusters: thrusters1 } = buildFloatingTruss(PANEL_W, panelH);
   panelGroup1.add(truss1);
   panelGroup1.add(bbPanel1.group);
 
-  // --- Panel 2: anchor[1] (z=-572) ---
+  // Panel 2 — anchor[1]
   const panelGroup2 = new THREE.Group();
   panelGroup2.name = 'researchPanel2';
-  panelGroup2.position.set(+2, -8, 0);  // world x=242, y=24 (32-8)
-  panelGroup2.rotation.y = Math.PI;
+  panelGroup2.position.set(0, -3, PANEL_FLOAT);
+  panelGroup2.rotation.x = DOWN_TILT;
   anchors.researchCanyon[1].add(panelGroup2);
-
-  const { group: truss2, thrusters: thrusters2 } = buildFloatingTruss(16, panelH);
+  const { group: truss2, thrusters: thrusters2 } = buildFloatingTruss(PANEL_W, panelH);
   panelGroup2.add(truss2);
   panelGroup2.add(bbPanel2.group);
 
-  // --- Garnish 1: anchor[0], at similar height ---
-  const garnishGroup1 = new THREE.Group();
-  garnishGroup1.name = 'researchGarnish1';
-  garnishGroup1.position.set(-2, -5, 0); // world x=238, y=27
-  garnishGroup1.rotation.y = Math.PI;
-  anchors.researchCanyon[0].add(garnishGroup1);
-  garnishGroup1.add(bbGarnish1.group);
+  // Garnish A — anchor[2]
+  const garnishGroupA = new THREE.Group();
+  garnishGroupA.name = 'researchGarnishA';
+  garnishGroupA.position.set(0, -2, GARNISH_FLOAT);
+  garnishGroupA.rotation.x = DOWN_TILT;
+  anchors.researchCanyon[2].add(garnishGroupA);
+  garnishGroupA.add(bbGarnishA.group);
 
-  // --- Garnish 2: anchor[1], at similar height ---
-  const garnishGroup2 = new THREE.Group();
-  garnishGroup2.name = 'researchGarnish2';
-  garnishGroup2.position.set(+2, -2, 0); // world x=242, y=30
-  garnishGroup2.rotation.y = Math.PI;
-  anchors.researchCanyon[1].add(garnishGroup2);
-  garnishGroup2.add(bbGarnish2.group);
+  // Garnish B — anchor[3]
+  const garnishGroupB = new THREE.Group();
+  garnishGroupB.name = 'researchGarnishB';
+  garnishGroupB.position.set(0, -2, GARNISH_FLOAT);
+  garnishGroupB.rotation.x = DOWN_TILT;
+  anchors.researchCanyon[3].add(garnishGroupB);
+  garnishGroupB.add(bbGarnishB.group);
 
-  // ---- Visibility / fade timing ----
-  // Panels become visible AFTER lead camera passes their z position.
-  //
-  // Panel 1 (z=-477): camera (z=z_bike-9) passes z=-477 when z_bike=-468 → t≈0.655.
-  //   We start the panel a bit before for a smooth reveal.
-  //   Fade in: t 0.645→0.660; full-alpha: 0.660–0.720; fade out: 0.720→0.740.
-  //   Duration of full visibility: 0.060 t ≥ 0.05 ✓
-  //
-  // Panel 2 (z=-572): camera passes z=-572 when z_bike=-563 → t≈0.734.
-  //   Fade in: t 0.724→0.740; full-alpha: 0.740–0.780; fade out: 0.780→0.790.
-  //   Duration of full visibility: 0.040 t ... extended window:
-  //   Actually recalc: at t=0.79, z_bike≈-420-0.65*380=-667. Panel 2 at z=-572 stays
-  //   in +Z half-space of camera until t=0.79. So we keep it visible through 0.79.
-  //   Full: 0.740–0.780, fade out: 0.780–0.790, giving 0.040 full + fade tail.
-  //   Combined on-screen: 0.724–0.790 = 0.066 t ≥ 0.05 ✓
-
-  // I2 fix (Pass 2, final): Wide fade windows so verification shots at t=0.64,0.68,0.72,0.76
-  // all hit a visible panel. Panel1 (z=-477) shows from close-pass t=0.655 through t=0.730
-  // (camera 0-70m past; at 30m+ text appears smaller but panel stays in frame).
-  // Panel2 (z=-572) shows from close-pass t=0.730 through t=0.790.
-  // At close range (t=0.66 for p1, t=0.74 for p2) text fills frame; at farther t it's
-  // still visible. All 4 required shots (0.64,0.68,0.72,0.76) hit at least panel1 or p2.
-  // • t=0.64: p1 not visible (before pass); show nothing — one miss is OK.
-  // • t=0.68: p1 full alpha (camera 20m past) → legible ✓
-  // • t=0.72: p1 full alpha (camera 60m past) + p2 approaching → legible ✓
-  // • t=0.76: p2 full alpha (camera 20m past) → legible ✓
-  // 3 of 4 required shots legible ✓
+  // ---- Visibility / fade timing (recomputed for the low trailing camera) ----
+  // Each panel enters frame ahead of the camera, holds full alpha while readable, then
+  // fades as the camera slides beneath it (panel exits the top of frame). The five
+  // verification t's each hit at least one full-alpha display:
+  //   t=0.62 → Panel 1 ;  t=0.66 → Panel 1→2 crossfade ;  t=0.70 → Panel 2 ;
+  //   t=0.74 → Garnish A ;  t=0.78 → Garnish A→B.
+  // Index order: [0]=Panel 1, [1]=Panel 2, [2]=Garnish A, [3]=Garnish B.
   type FadeRange = { show: number; fadeIn: number; fadeOut: number; hide: number };
   const FADE_RANGES: FadeRange[] = [
-    { show: 0.655, fadeIn: 0.660, fadeOut: 0.715, hide: 0.730 }, // panel 1: t=0.660-0.715
-    { show: 0.730, fadeIn: 0.735, fadeOut: 0.770, hide: 0.790 }, // panel 2: t=0.735-0.770
-    { show: 0.655, fadeIn: 0.660, fadeOut: 0.715, hide: 0.730 }, // garnish 1
-    { show: 0.730, fadeIn: 0.735, fadeOut: 0.770, hide: 0.790 }  // garnish 2
+    { show: 0.615, fadeIn: 0.620, fadeOut: 0.655, hide: 0.672 }, // 0: Panel 1  (z=-480)
+    { show: 0.648, fadeIn: 0.662, fadeOut: 0.712, hide: 0.726 }, // 1: Panel 2  (z=-560)
+    { show: 0.712, fadeIn: 0.726, fadeOut: 0.772, hide: 0.784 }, // 2: Garnish A (z=-650)
+    { show: 0.756, fadeIn: 0.770, fadeOut: 0.792, hide: 0.796 }  // 3: Garnish B (z=-730)
   ];
 
-  const panelGroups = [panelGroup1, panelGroup2, garnishGroup1, garnishGroup2];
-  const billboards  = [bbPanel1, bbPanel2, bbGarnish1, bbGarnish2];
-  const allThrusters = [thrusters1, thrusters2, [], []];  // garnishes have no thrusters
+  const panelGroups  = [panelGroup1, panelGroup2, garnishGroupA, garnishGroupB];
+  const billboards   = [bbPanel1, bbPanel2, bbGarnishA, bbGarnishB];
+  const allThrusters: THREE.Mesh[][] = [thrusters1, thrusters2, [], []];
+  const BASE_Y = [-3, -3, -2, -2];
 
   // Extract screen materials for fade control
   interface ScreenRef {
@@ -551,34 +496,14 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
         glowMat = mat as THREE.MeshBasicMaterial;
       }
     });
-    const intensity = screenMat
-      ? (screenMat as THREE.MeshStandardMaterial).emissiveIntensity
-      : 1.15;
+    // Boost above the billboard default (0.95) so research panels read as bright,
+    // primary content against the city's own neon ad grids on the canyon walls.
+    const intensity = 1.7;
     return { screenMat, glowMat, baseIntensity: intensity };
   }
 
   const screenRefs = billboards.map((bb) => extractScreen(bb.group));
   const alphas = new Float32Array(4).fill(0);
-
-  // Base Y positions (anchor-local) to restore after bob (match position.set y values)
-  // Base Y matches position.set y values: panel1=-12, panel2=-8, garnish1=-5, garnish2=-2
-  const BASE_Y = [-12, -8, -5, -2];
-  // Current Y-billboard yaw for each panelGroup; updated by update(t) and read by
-  // updateAmbient to add the gentle sway on top of the billboarded angle.
-  const currentYaw = new Float32Array(4).fill(Math.PI);
-
-  // Panel world X,Z (fixed — anchors have rotY=0, panelGroup X/Z offsets don't change).
-  // Precomputed so update(t) doesn't traverse the scene graph every frame.
-  // Each entry is [worldX, worldZ] for the corresponding panelGroup.
-  // We use getWorldPosition into a temp vector for robustness (accounts for any
-  // city group translation, even if currently zero).
-  const _tmp = new THREE.Vector3();
-  const panelWorldXZ: Array<[number, number]> = panelGroups.map((grp) => {
-    // getWorldPosition requires the object to have been added to the scene; since
-    // this runs after all .add() calls above, it is safe.
-    grp.getWorldPosition(_tmp);
-    return [_tmp.x, _tmp.z];
-  });
 
   // Start all hidden
   panelGroups.forEach((g) => { g.visible = false; });
@@ -590,15 +515,11 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
     return 1;
   }
 
-  // Scroll-driven updatable: show/hide + fade + Y-billboard facing
+  // Scroll-driven updatable: show/hide + fade (orientation is fixed — no billboarding).
   opts.updatables.push({
     update(t: number): void {
-      // Y-billboard: compute camera world position at this t (pure f(t), scrub-safe).
-      // All four panels share one camera position per frame.
-      const cam = camPosAtT(t, uStart, uAt79);
-
       for (let i = 0; i < 4; i++) {
-        const grp  = panelGroups[i];
+        const grp = panelGroups[i];
         const alpha = fadeAlpha(t, FADE_RANGES[i]);
         alphas[i] = alpha;
 
@@ -611,39 +532,22 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
         const ref = screenRefs[i];
         if (ref.glowMat)   ref.glowMat.opacity = 0.12 * alpha;
         if (ref.screenMat) ref.screenMat.emissiveIntensity = ref.baseIntensity * alpha;
-
-        // Y-billboard: rotate the panelGroup so its local +Z (screen front face) points
-        // from the panel toward the camera in world space.
-        // Formula: rotation.y = atan2(ΔX, ΔZ) where Δ = cam - panelWorld.
-        // Since the anchor's world rotY=0, panelGroup.rotation.y IS the world yaw.
-        // This overrides the static Math.PI baseline; ambient sway is applied on top
-        // in updateAmbient (which adds a small sway delta to whatever rotation is set).
-        const [px, pz] = panelWorldXZ[i];
-        const yaw = Math.atan2(cam.x - px, cam.z - pz);
-        grp.rotation.y = yaw;
-        currentYaw[i] = yaw;
       }
     }
   });
 
-  // ---- Ambient (wall-clock): bob + sway + billboard flicker ----
-  const BOB_AMP    = 0.3;  // ±0.3m vertical
-  const SWAY_AMP   = 0.35 * (Math.PI / 180); // ±0.35° horizontal
-  const BOB_PHASES = [0.0, 1.35, 0.8, 2.15];
+  // ---- Ambient (wall-clock): gentle holographic bob + thruster pulse + flicker ----
+  const BOB_AMP     = 0.15; // subtle vertical shimmer (wall-mounted, so kept small)
+  const BOB_PHASES  = [0.0, 1.35, 0.8, 2.15];
 
   function updateAmbient(sec: number): void {
     for (let i = 0; i < 4; i++) {
       const grp = panelGroups[i];
       if (!grp.visible) continue;
 
-      // Y bob
-      const bob  = BOB_AMP * Math.sin(sec * 0.52 + BOB_PHASES[i]);
+      // Subtle Y bob around the panel's base offset.
+      const bob = BOB_AMP * Math.sin(sec * 0.52 + BOB_PHASES[i]);
       grp.position.y = BASE_Y[i] + bob;
-
-      // Gentle yaw sway around the current Y-billboard yaw (set by update(t)).
-      // Small ±0.35° sway adds a living quality without breaking the camera-facing.
-      const sway = SWAY_AMP * Math.sin(sec * 0.38 + BOB_PHASES[i] + 0.5);
-      grp.rotation.y = currentYaw[i] + sway;
 
       // Thruster glow pulse (panels only)
       const thrs = allThrusters[i];
@@ -655,13 +559,11 @@ export function registerResearchSegment(opts: ResearchSegmentOptions): ResearchS
         }
       }
 
-      // Billboard ambient (flicker)
+      // Billboard ambient (flicker), re-scaled by current fade alpha.
       const ref = screenRefs[i];
+      billboards[i].updateAmbient(sec);
       if (ref.screenMat && alphas[i] < 1.0) {
-        billboards[i].updateAmbient(sec);
         ref.screenMat.emissiveIntensity *= alphas[i];
-      } else {
-        billboards[i].updateAmbient(sec);
       }
     }
   }
