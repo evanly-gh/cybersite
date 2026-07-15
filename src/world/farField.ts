@@ -479,31 +479,34 @@ function makeMoonColorTexture(rng: Rng): THREE.CanvasTexture {
     // threshold (~0.75 linear). This means the disc body doesn't bloom uniformly —
     // only the bright crater rims and ejecta highlights bloom, preserving visible
     // crater/maria detail in the close finale view (t=0.90-1.0).
-    ctx.fillStyle = '#989080';
+    ctx.fillStyle = '#b0a892';
     ctx.fillRect(0, 0, SIZE, SIZE);
 
     // --- Maria (dark seas) — hand-authored positions ---
     // Each entry: [centerX, centerY, radiusX, radiusY, opacity]
     const maria: [number, number, number, number, number][] = [
       // Oceanus Procellarum — large, left side
-      [310, 500, 210, 240, 0.22],
+      [310, 500, 210, 240, 0.72],
       // Mare Imbrium — upper-left
-      [390, 330, 155, 140, 0.20],
+      [390, 330, 155, 140, 0.66],
       // Mare Serenitatis — upper-center-right
-      [580, 360, 100, 95, 0.18],
+      [580, 360, 100, 95, 0.60],
       // Mare Tranquillitatis — center-right
-      [610, 490, 110, 90, 0.19],
+      [610, 490, 110, 90, 0.62],
       // Mare Crisium — far right, smallish
-      [760, 370, 58, 50, 0.16],
+      [760, 370, 58, 50, 0.55],
       // Mare Nubium — lower-left
-      [430, 640, 90, 70, 0.15],
+      [430, 640, 90, 70, 0.52],
     ];
 
     for (const [mx, my, rx, ry, alpha] of maria) {
       const grd = ctx.createRadialGradient(mx, my, 0, mx, my, Math.max(rx, ry));
-      grd.addColorStop(0, `rgba(60,55,45,${alpha})`);
-      grd.addColorStop(0.65, `rgba(55,50,40,${(alpha * 0.6).toFixed(3)})`);
-      grd.addColorStop(1, 'rgba(60,55,45,0)');
+      // Strong contrast: maria are markedly darker than the highland base so they read
+      // as detail at any on-screen scale (incl. the close finale view where the moon
+      // fills much of the frame).
+      grd.addColorStop(0, `rgba(38,36,32,${alpha})`);
+      grd.addColorStop(0.65, `rgba(46,43,37,${(alpha * 0.7).toFixed(3)})`);
+      grd.addColorStop(1, 'rgba(46,43,37,0)');
       ctx.save();
       ctx.scale(rx / Math.max(rx, ry), ry / Math.max(rx, ry));
       ctx.beginPath();
