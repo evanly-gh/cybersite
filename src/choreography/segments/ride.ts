@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CameraRig } from '../cameraRig';
 import { BikePath } from '../bikePath';
 import { roadFrame, ZONES, MOON_POS } from '../../world/route';
+import type { DisplayAnchor } from '../../world/cityLayout';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -25,6 +26,18 @@ function chaseKey(t: number, bike: BikePath) {
   return { t, pos, target, fov: 55 };
 }
 
+/**
+ * Compute the centroid of a set of DisplayAnchor positions.
+ * Returns null if the list is empty.
+ */
+function anchorCentroid(anchors: DisplayAnchor[]): THREE.Vector3 | null {
+  if (anchors.length === 0) return null;
+  const sum = new THREE.Vector3();
+  for (const a of anchors) sum.add(a.pos);
+  sum.divideScalar(anchors.length);
+  return sum;
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // registerRideSegments
 // ──────────────────────────────────────────────────────────────────────────────
@@ -38,10 +51,23 @@ function chaseKey(t: number, bike: BikePath) {
  *  - Default pose: chase cam behind-and-above the bike.
  *  - Special zones override pos / target / fov as per the task brief.
  *
- * Pure/deterministic: only reads from bike.state and roadFrame, no random or
- * wall-clock calls.
+ * @param anchors - Optional DisplayAnchor array from buildCity(). When provided,
+ *   the flip-apex and research camera keys frame the real anchor positions.
+ *   When absent, grey-box fallback poses are used (backward-compatible).
+ *
+ * Pure/deterministic: only reads from bike.state, roadFrame, and anchors, no
+ * random or wall-clock calls.
  */
-export function registerRideSegments(rig: CameraRig, bike: BikePath): void {
+export function registerRideSegments(
+  rig: CameraRig,
+  bike: BikePath,
+  anchors?: DisplayAnchor[],
+): void {
+
+  // Pre-filter anchors by kind for easy lookup.
+  const projBigAnchors   = anchors?.filter(a => a.kind === 'projBig')   ?? [];
+  const projSmallAnchors = anchors?.filter(a => a.kind === 'projSmall') ?? [];
+  const researchAnchors  = anchors?.filter(a => a.kind === 'research')  ?? [];
 
   // ── intro (0.00 – 0.12) ─────────────────────────────────────────────────
   // Standard chase across the straight intro road.
@@ -92,14 +118,18 @@ export function registerRideSegments(rig: CameraRig, bike: BikePath): void {
   rig.addKey(chaseKey(0.36, bike));
 
   {
-    // Flip apex 1 at t ≈ 0.41 — camera beside the bike.
+    // Flip apex 1 at t ≈ 0.41 — camera beside the bike, targeting projBig anchors.
     const t = 0.41;
     const { pos: bikePos } = bike.state(t);
     const { normal, binormal } = roadFrame(t);
     const pos = bikePos.clone()
       .addScaledVector(binormal, 10)
       .addScaledVector(normal, 2);
-    const target = bikePos.clone();
+
+    // Target: midpoint of projBig anchors if available, else bike position.
+    const projBigCentroid = anchorCentroid(projBigAnchors);
+    const target = projBigCentroid ?? bikePos.clone();
+
     rig.addKey({ t, pos, target, fov: 55 });
   }
 
@@ -114,14 +144,18 @@ export function registerRideSegments(rig: CameraRig, bike: BikePath): void {
   rig.addKey(chaseKey(0.52, bike));
 
   {
-    // Flip apex 2 at t ≈ 0.57 — camera beside the bike.
+    // Flip apex 2 at t ≈ 0.57 — camera beside the bike, targeting projSmall anchors.
     const t = 0.57;
     const { pos: bikePos } = bike.state(t);
     const { normal, binormal } = roadFrame(t);
     const pos = bikePos.clone()
       .addScaledVector(binormal, 10)
       .addScaledVector(normal, 2);
-    const target = bikePos.clone();
+
+    // Target: centroid of projSmall anchors if available, else bike position.
+    const projSmallCentroid = anchorCentroid(projSmallAnchors);
+    const target = projSmallCentroid ?? bikePos.clone();
+
     rig.addKey({ t, pos, target, fov: 55 });
   }
 
@@ -133,16 +167,31 @@ export function registerRideSegments(rig: CameraRig, bike: BikePath): void {
   }
 
   // ── research (0.68 – 0.84) ──────────────────────────────────────────────
-  // LOW camera (pos.y = 1.5) looking UP (target.y = 24), fov = 66.
+  // LOW camera (pos.y = 1.5) looking UP (target.y = 24+), fov = 66.
+  // When research anchors are available, target their positions (they are HIGH
+  // on the canyon walls, so camera at y=1.5 looking up frames them naturally).
   // We apply the research pose throughout the zone, including at boundaries,
   // so that the zone-interior sample at t = 0.76 definitely satisfies the test.
-  for (const t of [0.68, 0.72, 0.76, 0.80, 0.84]) {
-    const { pos: bikePos } = bike.state(t);
-    const { binormal } = roadFrame(t);
-    // Camera low beside the road, looking steeply upward.
-    const pos = new THREE.Vector3(bikePos.x + binormal.x * 5, 1.5, bikePos.z + binormal.z * 5);
-    const target = new THREE.Vector3(bikePos.x, 24, bikePos.z);
-    rig.addKey({ t, pos, target, fov: 66 });
+  {
+    const researchCentroid = anchorCentroid(researchAnchors);
+
+    for (const t of [0.68, 0.72, 0.76, 0.80, 0.84]) {
+      const { pos: bikePos } = bike.state(t);
+      const { binormal } = roadFrame(t);
+      // Camera low beside the road, looking steeply upward.
+      const pos = new THREE.Vector3(bikePos.x + binormal.x * 5, 1.5, bikePos.z + binormal.z * 5);
+
+      let target: THREE.Vector3;
+      if (researchCentroid) {
+        // Look toward the real anchor centroid — they sit at y≈22 on the canyon walls.
+        target = researchCentroid.clone();
+      } else {
+        // Fallback: grey-box up-look.
+        target = new THREE.Vector3(bikePos.x, 24, bikePos.z);
+      }
+
+      rig.addKey({ t, pos, target, fov: 66 });
+    }
   }
 
   // ── lift (0.84 – 0.89) ──────────────────────────────────────────────────
