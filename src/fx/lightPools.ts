@@ -77,6 +77,13 @@ export function buildLightPools(sources: THREE.Object3D[]): {
   /**
    * Reposition each disc under its source object's current world XZ.
    * Pure repositioning — no side effects other than mesh.position.
+   *
+   * Ordering contract: this must be called AFTER the master has positioned all
+   * source objects (bike + traffic) for the current frame/t-value. The master
+   * drives sources to their t-positions via setProgress() before calling
+   * pools.update(t), so getWorldPosition() reads the correct scrub-consistent
+   * positions and the composed result is deterministic: same t → same source
+   * positions → same pool positions.
    */
   function update(_t: number): void {
     for (let i = 0; i < sources.length; i++) {

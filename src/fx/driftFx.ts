@@ -106,11 +106,8 @@ export function buildDriftFx(maxSmoke: number): {
     mesh.name = `smokePuff_${i}`;
     mesh.frustumCulled = false;
     mesh.visible = false;
-
-    // Apply deterministic XZ offset to the mesh position (relative to its spawn point).
-    mesh.position.x += specs[i].offsetX;
-    mesh.position.z += specs[i].offsetZ;
-
+    // XZ offset is applied in update() via mesh.position.set(base.x+offsetX, ..., base.z+offsetZ).
+    // Do NOT set it here — update() owns positioning and would overwrite it anyway.
     group.add(mesh);
     return mesh;
   });

@@ -62,6 +62,16 @@ interface Snapshot {
 }
 
 // ---------------------------------------------------------------------------
+// Module-scope scratch allocations (reused every frame — zero per-frame heap)
+// ---------------------------------------------------------------------------
+
+/** Pre-baked uniform scale matrix for GHOST_SCALE. Allocated once, reused every update(). */
+const _scaleM = new THREE.Matrix4().makeScale(GHOST_SCALE, GHOST_SCALE, GHOST_SCALE);
+
+/** Scratch Color for rainbow blending. Allocated once, reused every update(). */
+const _rainbowColor = new THREE.Color();
+
+// ---------------------------------------------------------------------------
 // buildSandevistan
 // ---------------------------------------------------------------------------
 
@@ -93,7 +103,8 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): {
     mesh.name = `ghost_${i}`;
     mesh.frustumCulled = false;
     mesh.visible = false;
-    mesh.scale.setScalar(GHOST_SCALE);
+    // Note: scale is NOT set here — it is applied once per frame via _scaleM.premultiply()
+    // in update() on the manually composed matrix (matrixAutoUpdate = false path).
     group.add(mesh);
     ghosts.push(mesh);
     snapshots.push({ matrix: new THREE.Matrix4(), t: -1, active: false });
@@ -157,17 +168,7 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): {
     // Assign visible ghosts.
     const nActive = active.length;
 
-    for (let gi = 0; gi < GHOST_COUNT; gi++) {
-      const mesh = ghosts[gi];
-      const slot = active.findIndex((a) => {
-        // Find the mesh slot that matches this active entry positionally.
-        // We just use gi as the position in the sorted active array.
-        return false; // handled below
-      });
-      mesh.visible = false;
-    }
-
-    // Simpler: assign the sorted active list to the first nActive ghosts.
+    // Single loop: reset inactive slots to invisible, apply snapshot to active slots.
     for (let gi = 0; gi < GHOST_COUNT; gi++) {
       const mesh = ghosts[gi];
       const mat = mesh.material as THREE.MeshBasicMaterial;
@@ -178,19 +179,17 @@ export function buildSandevistan(ghostGeom: THREE.BufferGeometry): {
 
         mesh.matrixAutoUpdate = false;
         mesh.matrix.copy(snap.matrix);
-        // Bake scale into the matrix: scale each column's magnitude by GHOST_SCALE.
-        // Since we stored the world matrix from the bike group, we apply a
-        // uniform scale by composing it.
-        const scaleM = new THREE.Matrix4().makeScale(GHOST_SCALE, GHOST_SCALE, GHOST_SCALE);
-        mesh.matrix.premultiply(scaleM);
+        // Bake scale into the matrix using the pre-allocated scratch _scaleM (no per-frame allocation).
+        mesh.matrix.premultiply(_scaleM);
 
         mat.opacity = opacity;
 
         if (rainbow > 0.01) {
           // Rainbow: cycle hue through ghost chain at apexes.
+          // Reuse pre-allocated scratch _rainbowColor (no per-frame allocation).
           const rainbowIdx = Math.floor((gi / GHOST_COUNT) * RAINBOW.length);
-          const rainbowColor = new THREE.Color(RAINBOW[rainbowIdx % RAINBOW.length]);
-          mat.color.copy(cyan).lerp(rainbowColor, rainbow);
+          _rainbowColor.set(RAINBOW[rainbowIdx % RAINBOW.length]);
+          mat.color.copy(cyan).lerp(_rainbowColor, rainbow);
         } else {
           mat.color.copy(cyan);
         }
