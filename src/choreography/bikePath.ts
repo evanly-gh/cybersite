@@ -109,11 +109,31 @@ function computePitch(t: number): number {
 const CROUCH_DEFAULT = 0.2;
 const CROUCH_FLIP    = 0.6;
 
+/**
+ * Tent pulse for a single zone: rises from 0 at zone start to 1 at midpoint,
+ * then falls back to 0 at zone end. Returns 0 outside the zone.
+ * Uses smoothstep on each half for a smooth ease in/out.
+ */
+function tent(t: number, zone: [number, number]): number {
+  const [a, b] = zone;
+  if (t <= a || t >= b) return 0;
+  const mid = (a + b) / 2;
+  if (t <= mid) {
+    // Rising half: 0 at a → 1 at mid
+    return smoothstep((t - a) / (mid - a));
+  } else {
+    // Falling half: 1 at mid → 0 at b
+    return smoothstep((b - t) / (b - mid));
+  }
+}
+
 function computeCrouch(t: number): number {
-  const f1 = zoneFraction(t, ZONES.ramp1 as [number, number]);
-  const f2 = zoneFraction(t, ZONES.ramp2 as [number, number]);
-  // Blend crouch up during each flip (both arcs sum, but only one is nonzero at a time).
-  const flipBlend = Math.min(1, f1 + f2);
+  // Each ramp zone produces a tent pulse (0 outside, peaks at 1 at midpoint).
+  // Take the max so the two zones never interfere or latch.
+  const flipBlend = Math.max(
+    tent(t, ZONES.ramp1 as [number, number]),
+    tent(t, ZONES.ramp2 as [number, number])
+  );
   return THREE.MathUtils.lerp(CROUCH_DEFAULT, CROUCH_FLIP, flipBlend);
 }
 

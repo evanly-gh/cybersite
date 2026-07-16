@@ -29,4 +29,16 @@ describe('BikePath', () => {
   it('wheelSpin is monotonic', () => {
     expect(bp.state(0.6).pose.wheelSpin).toBeGreaterThan(bp.state(0.3).pose.wheelSpin);
   });
+
+  it('crouch returns to baseline outside ramp zones (no latch bug)', () => {
+    // t=0.75 is deep in research zone, well past both ramp zones
+    const crouchResearch = bp.state(0.75).pose.crouch;
+    expect(crouchResearch).toBeLessThan(0.3);
+  });
+
+  it('crouch is elevated near flip apex (ramp1 midpoint t≈0.41)', () => {
+    // ramp1 is [0.36, 0.46], midpoint at 0.41
+    const crouchApex = bp.state(0.41).pose.crouch;
+    expect(crouchApex).toBeGreaterThan(0.5);
+  });
 });
