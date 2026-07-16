@@ -78,7 +78,15 @@ export function registerRideSegments(
   // ── about (0.12 – 0.28) ─────────────────────────────────────────────────
   // Swing camera out along +binormal to frame the hero wall on the side.
   // At ~0.20 the swing is at its peak; ease in at 0.12 and out at 0.28.
+  //
+  // aboutHero anchor sits at +binormal side, lateralOffset=28m, y=14.
+  // Camera floats 10m out (–binormal from anchor) and 4m below the anchor.
+  // Target is the anchor position so the hero billboard fills the frame.
   {
+    // Filter aboutHero anchors for direct targeting.
+    const aboutHeroAnchors = anchors?.filter(a => a.kind === 'aboutHero') ?? [];
+    const aboutHeroCentroid = anchorCentroid(aboutHeroAnchors);
+
     // Zone start — standard chase to give a smooth approach.
     rig.addKey(chaseKey(0.12, bike));
 
@@ -86,13 +94,27 @@ export function registerRideSegments(
     const t = 0.20;
     const { pos: bikePos } = bike.state(t);
     const { tangent, normal, binormal } = roadFrame(t);
-    // Pull camera behind + slightly up + 14 units along +binormal.
+
+    // Camera: position inside the corridor (binormal*4) at mid-height, looking
+    // sideways and slightly forward toward the aboutHero billboard which sits
+    // at binormal*19, y=14 (just outside the road edge, in front of buildings).
+    // The camera is at binormal*4 so there are 15m of clear air between it and
+    // the billboard — enough to read the portrait content at fov=58.
+    // Moving forward 10m along tangent puts the billboard slightly behind-right,
+    // giving a cinematic angle-of-view rather than a flat head-on shot.
     const pos = bikePos.clone()
-      .addScaledVector(tangent, -6)
-      .addScaledVector(normal, 3)
-      .addScaledVector(binormal, 14);
-    // Target toward the wall side (bikePos offset along +binormal).
-    const target = bikePos.clone().addScaledVector(binormal, 20);
+      .addScaledVector(tangent, 10)    // slightly ahead of anchor t
+      .addScaledVector(binormal, 4)    // inside corridor, looking sideways
+      .add(new THREE.Vector3(0, 8, 0)); // camera below billboard centre for upward look
+
+    // Target: the real aboutHero anchor (binormal*19, y=14) or fallback.
+    const target = aboutHeroCentroid
+      ? aboutHeroCentroid.clone()
+      : bikePos.clone()
+          .addScaledVector(tangent, 10)
+          .addScaledVector(binormal, 19)
+          .add(new THREE.Vector3(0, 14, 0));
+
     rig.addKey({ t, pos, target, fov: 55 });
 
     // Zone end — back to standard chase for smooth exit into turn.
@@ -167,30 +189,41 @@ export function registerRideSegments(
   }
 
   // ── research (0.68 – 0.84) ──────────────────────────────────────────────
-  // LOW camera (pos.y = 1.5) looking UP (target.y = 24+), fov = 66.
-  // When research anchors are available, target their positions (they are HIGH
-  // on the canyon walls, so camera at y=1.5 looking up frames them naturally).
-  // We apply the research pose throughout the zone, including at boundaries,
-  // so that the zone-interior sample at t = 0.76 definitely satisfies the test.
+  // Research anchors are placed on the −binormal canyon wall (side=−1) at
+  // y=22 and lateralOffset=19m, facing +binormal.  The camera sits on the
+  // +binormal side at y≈3 and looks across the road toward both signs, with
+  // the bike visible in the lower portion of the frame between camera and signs.
+  //
+  // binormal = +X throughout this zone (route travels −Z).  Camera at
+  // bikePos.x + 12 (inside the corridor, +X side), looking toward x − 31
+  // (= 240 − 19 = 221, the anchor face position).
   {
     const researchCentroid = anchorCentroid(researchAnchors);
 
     for (const t of [0.68, 0.72, 0.76, 0.80, 0.84]) {
       const { pos: bikePos } = bike.state(t);
-      const { binormal } = roadFrame(t);
-      // Camera low beside the road, looking steeply upward.
-      const pos = new THREE.Vector3(bikePos.x + binormal.x * 5, 1.5, bikePos.z + binormal.z * 5);
+      const { tangent, binormal } = roadFrame(t);
 
-      let target: THREE.Vector3;
-      if (researchCentroid) {
-        // Look toward the real anchor centroid — they sit at y≈22 on the canyon walls.
-        target = researchCentroid.clone();
-      } else {
-        // Fallback: grey-box up-look.
-        target = new THREE.Vector3(bikePos.x, 24, bikePos.z);
-      }
+      // Camera: +binormal side of road (x = road.x + 6), low (y=4).
+      // Both anchors are at the same z as researchMid (t=0.76), so camera
+      // and anchors share z-position → look direction has no Z component.
+      // Anchors on −binormal side at lateral=19m: at x = road.x − 19.
+      // Anchors stacked at y=20 and y=32, centroid y=26.
+      const pos = bikePos.clone()
+        .addScaledVector(binormal, 6)    // +binormal inside corridor
+        .add(new THREE.Vector3(0, 4, 0)); // low
 
-      rig.addKey({ t, pos, target, fov: 66 });
+      // Centroid of both anchors: same x (road.x-19), same z, y=26.
+      // Lower the target slightly toward y=18 so the lower portion of the
+      // FOV includes the bike (at y=0 on the road, slightly below screen center).
+      const target = researchCentroid
+        ? researchCentroid.clone().add(new THREE.Vector3(0, -6, 0)) // shift down to y≈20
+        : bikePos.clone()
+            .addScaledVector(binormal, -19)
+            .add(new THREE.Vector3(0, 18, 0));
+
+      // fov=68: widen slightly so the bike (low) and upper billboard (high) both fit.
+      rig.addKey({ t, pos, target, fov: 68 });
     }
   }
 

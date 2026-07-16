@@ -350,30 +350,34 @@ export function buildCity(lib: NeoLibrary, seed: number): City {
     );
   }
 
-  // aboutHero — 1 anchor, +binormal side, t≈0.20, pos.y≈14
+  // aboutHero — 1 anchor, +binormal side, t≈0.20.
+  // PLACEMENT: lateralOffset = CORRIDOR_HALF + 2 = 19m so the billboard sits
+  // in the clear zone BETWEEN the road edge and the building near-faces (which
+  // start at CORRIDOR_HALF + BASE_GAP_MIN = 20m).  y=14 centres a portrait
+  // billboard in the vertical frame.
   {
     const t = 0.20;
     const side = 1;
     anchors.push({
-      pos: anchorPos(t, side, MIN_ROAD_CLEARANCE + 8, 14),
+      pos: anchorPos(t, side, CORRIDOR_HALF + 2, 14),
       quat: anchorQuat(t, side),
       kind: 'aboutHero',
     });
   }
 
-  // aboutSign — 2–3 anchors near aboutHero (bio + 2 misc), slightly lower/spaced
+  // aboutSign — 2–3 supporting signs near aboutHero, also in the clear zone.
   {
     const t = 0.20;
     const side = 1;
     const baseH = 8;
-    const lateralBase = MIN_ROAD_CLEARANCE + 6;
+    const lateralBase = CORRIDOR_HALF + 2; // same clear-zone as aboutHero
     // Sign 1: slightly back along route
     anchors.push({
       pos: anchorPos(t - 0.012, side, lateralBase, baseH),
       quat: anchorQuat(t - 0.012, side),
       kind: 'aboutSign',
     });
-    // Sign 2: at t
+    // Sign 2: at t, slightly higher
     anchors.push({
       pos: anchorPos(t + 0.012, side, lateralBase, baseH + 2),
       quat: anchorQuat(t + 0.012, side),
@@ -425,25 +429,35 @@ export function buildCity(lib: NeoLibrary, seed: number): City {
     });
   }
 
-  // research — 2 anchors HIGH (pos.y≈22) on canyon walls within research zone
-  // (0.68–0.84), one per side, tilted down toward the low upward-looking camera.
+  // research — 2 anchors HIGH on the -binormal canyon wall (side=-1).
+  // BOTH anchors share the same route t (0.76 = researchMid) so the camera
+  // at t=0.76 sees both directly ahead (no Z spread between them).  They are
+  // vertically stacked: one at y=20, one at y=30 — both visible in a single
+  // upward-look frame.
+  //
+  // Camera sits on the +binormal side (x ≈ road.x + 6) at y=4, looking
+  // toward -binormal at y≈25 (midpoint between the two heights).
+  // Anchors face +binormal (front = +X in world at t=0.76) so the emissive
+  // screen is visible from the +X camera side.
+  //
+  // Lateral offset = CORRIDOR_HALF + 2 = 19m — clear zone in front of buildings.
   {
-    const tResearch = 0.76; // researchMid
-    const lateralOff = MIN_ROAD_CLEARANCE + 12;
-    const y = 22;
-    for (const side of [1, -1] as const) {
-      // Tilt the anchor down slightly: apply a small pitch rotation
-      const baseQuat = anchorQuat(tResearch, side);
-      const pitchAxis = new THREE.Vector3(1, 0, 0); // local right (before rotation)
-      const pitchQuat = new THREE.Quaternion().setFromAxisAngle(pitchAxis, Math.PI / 10);
-      baseQuat.multiply(pitchQuat);
+    const tResearch = 0.76; // researchMid — same t for both to keep same z
+    const lateralOff = CORRIDOR_HALF + 2; // 19m clear zone
+    const side = -1 as const; // face toward +binormal (+X at t=0.76)
 
-      anchors.push({
-        pos: anchorPos(tResearch, side, lateralOff, y),
-        quat: baseQuat,
-        kind: 'research',
-      });
-    }
+    // Anchor 1: lower (y=20) — first research entry
+    anchors.push({
+      pos: anchorPos(tResearch, side, lateralOff, 20),
+      quat: anchorQuat(tResearch, side),
+      kind: 'research',
+    });
+    // Anchor 2: higher (y=32) — second research entry; vertical stack
+    anchors.push({
+      pos: anchorPos(tResearch, side, lateralOff, 32),
+      quat: anchorQuat(tResearch, side),
+      kind: 'research',
+    });
   }
 
   // ── City object ─────────────────────────────────────────────────────────────
