@@ -53,13 +53,8 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
   const { loadNeoCity } = await import('./assets/buildings/neocity');
   loader.setProgress(20);
 
-  let neoLib: Awaited<ReturnType<typeof loadNeoCity>>;
-  try {
-    neoLib = await loadNeoCity('/models/neocity/');
-  } catch {
-    // Graceful: build with an empty library if assets unavailable.
-    neoLib = await loadNeoCity('/models/neocity/'); // loadNeoCity handles empty gracefully
-  }
+  // loadNeoCity swallows fetch errors internally (returns makeLibrary({}) on failure).
+  const neoLib = await loadNeoCity('/models/neocity/');
   loader.setProgress(40);
 
   // ── Dynamic imports: world + choreography (code-split, not in initial bundle)
@@ -152,13 +147,17 @@ async function bootHero(canvas: HTMLCanvasElement): Promise<void> {
   // 3. Sandevistan — record bike matrix then update trail
   // Seed the trail on first frames when snapshotCount is low by replaying
   // bikePath.state 0→t in ~80 steps (mirrors the pattern described in task brief).
+  // Guard: seed only once — scrubbing back to t=0 drops snapshotCount but we
+  // must not re-seed with all-zero tSeed values (80 identical zero records).
+  let sandevistanSeeded = false;
   updatables.push({
     update(t: number): void {
       // Record current bike world matrix
       sandevistan.record(bikeAsset.group.matrixWorld, t);
 
-      // Seed trail when starting fresh (snapshotCount low)
-      if (sandevistan.snapshotCount < 8) {
+      // Seed trail once when starting fresh (snapshotCount low)
+      if (!sandevistanSeeded && sandevistan.snapshotCount < 8) {
+        sandevistanSeeded = true;
         const steps = 80;
         for (let i = 0; i < steps; i++) {
           const tSeed = (i / steps) * t;
