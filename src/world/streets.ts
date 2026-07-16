@@ -731,10 +731,14 @@ export function buildScaffolding(rng: Rng): THREE.Group {
     roughness: 0.3,
   });
 
-  // Rotation to align the scaffold along the route tangent (-Z for this zone)
+  // Rotation to align the scaffold along the route tangent's HEADING only.
+  // We project the tangent onto the XZ plane (dropping Y) so the quaternion is
+  // a pure yaw: the deck stays flat (rideable) and poles stay world-vertical
+  // even when the route tangent has a Y component (slope near the ramp).
+  const tangentXZ = new THREE.Vector3(tangent.x, 0, tangent.z).normalize();
   const alignQuat = new THREE.Quaternion().setFromUnitVectors(
     new THREE.Vector3(0, 0, 1),
-    tangent
+    tangentXZ
   );
 
   // Helper: add a box-mesh in scaffold-local space (before rotation/translation)
@@ -782,21 +786,27 @@ export function buildScaffolding(rng: Rng): THREE.Group {
     const localZ = (i / nPoles - 0.5) * DECK_LENGTH;
     for (const side of [-1, 1]) {
       const localX = side * (DECK_HALF_WIDTH - 0.25);
-      // Vertical pole from ground to deck
+      // Vertical pole from ground to deck.
+      // CylinderGeometry axis is world Y. alignQuat is now yaw-only (XZ-plane
+      // projection of the tangent), so it never tilts the Y axis — poles stay
+      // world-vertical. We place the pole centred at deck_y - half its height.
       const poleGeom = new THREE.CylinderGeometry(0.1, 0.12, POLE_HEIGHT_BELOW, 8);
       const poleMesh = new THREE.Mesh(poleGeom, matSteel);
       poleMesh.name = 'pole';
       const localPos = new THREE.Vector3(localX, -POLE_HEIGHT_BELOW / 2, localZ);
       localPos.applyQuaternion(alignQuat);
       poleMesh.position.copy(deckCentre).add(localPos);
-      poleMesh.quaternion.copy(alignQuat);
+      // Leave quaternion as identity — yaw-only alignQuat makes no difference on
+      // a rotationally-symmetric cylinder, and identity keeps the axis world-vertical.
       poleMesh.castShadow = true;
       group.add(poleMesh);
+    }
 
-      // Horizontal cross-brace every other interval
-      if (i < nPoles && i % 2 === 0) {
-        addBox(matSteel, 'cross-brace', 0, -POLE_HEIGHT_BELOW * 0.35, localZ + POLE_SPACING * 0.5, DECK_HALF_WIDTH * 2, 0.08, 0.08);
-      }
+    // Horizontal cross-brace every other interval — placed ONCE per bay (not per side).
+    // A cross-brace spans the full deck width (centred at x=0), so adding it
+    // inside the side loop would create two identical overlapping meshes.
+    if (i < nPoles && i % 2 === 0) {
+      addBox(matSteel, 'cross-brace', 0, -POLE_HEIGHT_BELOW * 0.35, localZ + POLE_SPACING * 0.5, DECK_HALF_WIDTH * 2, 0.08, 0.08);
     }
   }
 

@@ -110,6 +110,16 @@ describe('buildScaffolding', () => {
     expect(box.max.y).toBeGreaterThan(9);
   });
 
+  it('poles are world-vertical: bbox.max.y is near deck + small rail height, not inflated by lean', () => {
+    const g = buildScaffolding(makeRng(5));
+    const box = new THREE.Box3().setFromObject(g);
+    // Deck is at y≈13; top rails add ~1.1m, work lights ~0.3m → max.y should be
+    // roughly 14–15, never the ~26 produced when poles lean from a tilted alignQuat.
+    // This assertion FAILS against the pre-fix geometry (bbox.max.y≈26)
+    // and PASSES after the fix (bbox.max.y≈14-16).
+    expect(box.max.y).toBeLessThan(20);
+  });
+
   it('has structural meshes (poles, planks, netting)', () => {
     const g = buildScaffolding(makeRng(5));
     let meshes = 0;
