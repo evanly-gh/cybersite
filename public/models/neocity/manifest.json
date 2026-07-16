@@ -6,7 +6,8 @@
       0.3706,
       1.1269,
       1.9638
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_A_Main",
@@ -15,7 +16,8 @@
       3.6207,
       6.0127,
       0.6904
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_C_Main",
@@ -24,7 +26,8 @@
       6.6159,
       3.8335,
       4.3259
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_C_NeonSignA",
@@ -33,7 +36,8 @@
       3.7278,
       1.959,
       0.8553
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_C_NeonSignB",
@@ -42,7 +46,8 @@
       0.9655,
       0.9655,
       0.1454
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_C_Boxes",
@@ -51,7 +56,8 @@
       1.579,
       0.7532,
       1.9218
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_C_Fan",
@@ -60,7 +66,8 @@
       0.7035,
       2.753,
       0.733
-    ]
+    ],
+    "hasEmissive": false
   },
   {
     "name": "KB3D_NEC_BldgSM_C_CratesB",
@@ -69,7 +76,8 @@
       2.8372,
       1.0805,
       1.4951
-    ]
+    ],
+    "hasEmissive": false
   },
   {
     "name": "KB3D_NEC_BldgSM_C_NeonSignC",
@@ -78,7 +86,8 @@
       0.774,
       3.2703,
       1.0549
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_C_CratesA",
@@ -87,7 +96,8 @@
       3.6463,
       1.7678,
       1.4681
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_C_Pipes",
@@ -96,7 +106,8 @@
       0.8034,
       2.6093,
       0.7605
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_C_Shelf",
@@ -105,7 +116,8 @@
       2.2698,
       2.0337,
       0.9393
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_C_Containers",
@@ -114,7 +126,8 @@
       0.6573,
       0.6277,
       1.8647
-    ]
+    ],
+    "hasEmissive": false
   },
   {
     "name": "KB3D_NEC_BldgSM_C_Stool",
@@ -123,7 +136,8 @@
       0.7169,
       0.4363,
       0.7099
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_C_AC",
@@ -132,7 +146,8 @@
       4.6893,
       1.8289,
       0.5733
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_B_FridgeA",
@@ -141,7 +156,8 @@
       2.3766,
       1.0723,
       1.0315
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_B_Bbq",
@@ -150,7 +166,8 @@
       1.3248,
       1.5892,
       1.2542
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_B_Umbrella",
@@ -159,7 +176,8 @@
       3.347,
       3.446,
       3.347
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_B_Computers",
@@ -168,7 +186,8 @@
       2.5386,
       2.7785,
       0.9347
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_B_Main",
@@ -177,7 +196,8 @@
       3.5337,
       3.1199,
       1.5518
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_B_Cart",
@@ -186,7 +206,8 @@
       3.023,
       2.7857,
       2.8545
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgSM_B_FridgeB",
@@ -195,7 +216,8 @@
       1.7779,
       3.1345,
       1.6255
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgMD_B_Main",
@@ -204,7 +226,8 @@
       26.7809,
       57.3356,
       22.8116
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgLG_A_BuildingB",
@@ -213,7 +236,8 @@
       22.6709,
       72.6305,
       25.1114
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgLG_A_Base",
@@ -222,7 +246,8 @@
       78.0875,
       0.6001,
       59.5948
-    ]
+    ],
+    "hasEmissive": false
   },
   {
     "name": "KB3D_NEC_BldgLG_A_BuildingD",
@@ -231,7 +256,8 @@
       20.0217,
       19.7844,
       13.8621
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgLG_A_BuildingC",
@@ -240,7 +266,8 @@
       11.2671,
       23.5128,
       11.3878
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgLG_A_BuildingA",
@@ -249,7 +276,8 @@
       13.0598,
       41.6857,
       17.8878
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgLG_A_Main",
@@ -258,7 +286,8 @@
       29.864,
       67.2021,
       28.9941
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgLG_A_Tree",
@@ -267,7 +296,8 @@
       20.1647,
       11.4621,
       15.9623
-    ]
+    ],
+    "hasEmissive": false
   },
   {
     "name": "KB3D_NEC_BldgMD_A_AntennaA",
@@ -276,7 +306,8 @@
       1.272,
       27.048,
       1.04
-    ]
+    ],
+    "hasEmissive": false
   },
   {
     "name": "KB3D_NEC_BldgMD_A_Base",
@@ -285,7 +316,8 @@
       31.7864,
       7.1092,
       16.45
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgMD_A_Banners",
@@ -294,7 +326,8 @@
       2.1866,
       4.1532,
       0.3373
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgMD_A_Main",
@@ -303,7 +336,8 @@
       28.4436,
       13.327,
       14.6131
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgMD_C_Base",
@@ -312,7 +346,8 @@
       68.651,
       2.0409,
       26.6476
-    ]
+    ],
+    "hasEmissive": false
   },
   {
     "name": "KB3D_NEC_BldgMD_C_BuildingA",
@@ -321,7 +356,8 @@
       5.8825,
       15.3793,
       3.5546
-    ]
+    ],
+    "hasEmissive": false
   },
   {
     "name": "KB3D_NEC_BldgMD_C_Banners",
@@ -330,7 +366,8 @@
       4.4174,
       8.3904,
       22.9315
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgMD_C_AntennaA",
@@ -339,7 +376,8 @@
       1.272,
       27.048,
       1.04
-    ]
+    ],
+    "hasEmissive": false
   },
   {
     "name": "KB3D_NEC_BldgMD_C_Main",
@@ -348,7 +386,8 @@
       49.1085,
       57.8597,
       23.1987
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgLG_C_AntennaA",
@@ -357,7 +396,8 @@
       1.0524,
       31.0694,
       1.2189
-    ]
+    ],
+    "hasEmissive": false
   },
   {
     "name": "KB3D_NEC_BldgLG_C_AntennaD",
@@ -366,7 +406,8 @@
       0.7977,
       20.7469,
       0.9757
-    ]
+    ],
+    "hasEmissive": false
   },
   {
     "name": "KB3D_NEC_BldgLG_C_AntennaC",
@@ -375,7 +416,8 @@
       0.5453,
       13.7876,
       0.4196
-    ]
+    ],
+    "hasEmissive": false
   },
   {
     "name": "KB3D_NEC_BldgLG_C_AntennaB",
@@ -384,7 +426,8 @@
       0.5295,
       13.7711,
       0.6476
-    ]
+    ],
+    "hasEmissive": false
   },
   {
     "name": "KB3D_NEC_BldgLG_C_Base",
@@ -393,7 +436,8 @@
       36.5503,
       7.2127,
       38.2221
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgLG_C_Main",
@@ -402,7 +446,8 @@
       35.227,
       142.6311,
       33.8571
-    ]
+    ],
+    "hasEmissive": true
   },
   {
     "name": "KB3D_NEC_BldgLG_B_AntennaA",
@@ -411,7 +456,8 @@
       5.9228,
       41.2463,
       7.1912
-    ]
+    ],
+    "hasEmissive": false
   },
   {
     "name": "KB3D_NEC_BldgLG_B_Main",
@@ -420,6 +466,7 @@
       54.5732,
       201.0587,
       45.3777
-    ]
+    ],
+    "hasEmissive": true
   }
 ]
