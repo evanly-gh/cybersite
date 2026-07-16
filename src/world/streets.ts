@@ -62,15 +62,31 @@ function buildStripGeometry(
   const n = leftEdge.length;
   const positions: number[] = [];
   const normals: number[] = [];
+  const uvs: number[] = [];
   const indices: number[] = [];
+
+  // Accumulate arc length along the strip for the v coordinate.
+  // v runs 0→1 along the full route length; the texture's repeat.y=8 handles tiling.
+  const segLengths: number[] = [0]; // segLengths[i] = cumulative length up to ring i
+  for (let i = 1; i < n; i++) {
+    // Use the midpoint of the two edges to measure along-route progress.
+    const prevMid = leftEdge[i - 1].clone().add(rightEdge[i - 1]).multiplyScalar(0.5);
+    const currMid = leftEdge[i].clone().add(rightEdge[i]).multiplyScalar(0.5);
+    segLengths.push(segLengths[i - 1] + prevMid.distanceTo(currMid));
+  }
+  const totalLength = segLengths[n - 1] || 1; // guard against degenerate strip
 
   for (let i = 0; i < n; i++) {
     const l = leftEdge[i];
     const r = rightEdge[i];
+    const v = segLengths[i] / totalLength; // 0→1 along full strip length
     // Vertex index base for this slice: 2*i (left), 2*i+1 (right)
     positions.push(l.x, l.y, l.z);
     positions.push(r.x, r.y, r.z);
     normals.push(0, 1, 0, 0, 1, 0); // pointing up (flat road/sidewalk)
+    // u=0 at left edge, u=1 at right edge; v along the route
+    uvs.push(0, v);
+    uvs.push(1, v);
   }
 
   // Build quads between consecutive slices.
@@ -89,6 +105,7 @@ function buildStripGeometry(
   const geom = new THREE.BufferGeometry();
   geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geom.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geom.setIndex(indices);
   return geom;
 }

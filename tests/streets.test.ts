@@ -38,6 +38,18 @@ describe('streets', () => {
   it('road half width constant', () => {
     expect(ROAD_HALF_WIDTH).toBe(7);
   });
+
+  it('road mesh geometry has a uv attribute (required for lane-markings texture)', () => {
+    const g = buildStreets(makeRng(1));
+    let roadMesh: THREE.Mesh | undefined;
+    g.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh && o.name === 'road') {
+        roadMesh = o as THREE.Mesh;
+      }
+    });
+    expect(roadMesh).toBeDefined();
+    expect(roadMesh!.geometry.getAttribute('uv')).toBeDefined();
+  });
 });
 
 describe('buildShibuya', () => {
