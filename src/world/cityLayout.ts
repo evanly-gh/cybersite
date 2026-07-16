@@ -197,13 +197,23 @@ function placePiece(
   const frame = roadFrame(t);
   const { pos: roadPos, tangent, binormal } = frame;
 
-  // The half-extent presented toward the road: piece oriented so local +Z faces
-  // the road (rotated by π on the +binormal side). In that orientation, bbox[2]
-  // is depth (along road-facing direction), so half-depth is bbox[2]/2.
-  const halfDepth = spec.bbox[2] / 2;
+  // Decide yaw variation FIRST so we can compute the true rotated footprint
+  // before calling clampOutsideRoad. The yaw is applied around Y axis.
+  // Slight random yaw variation for visual interest (±10°)
+  const yawVariation = rng.range(-Math.PI / 18, Math.PI / 18);
 
-  // Initial placement: center at CORRIDOR_HALF + gap + halfDepth from road center
-  const initialOffset = CORRIDOR_HALF + gap + halfDepth;
+  // The piece is oriented so its local +Z faces the road (toward −binormal*side
+  // at yaw=0). With a yaw deviation of θ from that facing direction:
+  //   presentedHalfExtent = (bbox[0]/2)*|sin θ| + (bbox[2]/2)*|cos θ|
+  // This is the true world-space half-span along the binormal axis.
+  const halfW = spec.bbox[0] / 2;
+  const halfD = spec.bbox[2] / 2;
+  const absYaw = Math.abs(yawVariation);
+  const presentedHalfExtent = halfW * Math.sin(absYaw) + halfD * Math.cos(absYaw);
+
+  // Initial placement: center at CORRIDOR_HALF + gap + presentedHalfExtent
+  // so the near face starts at exactly CORRIDOR_HALF + gap from road center.
+  const initialOffset = CORRIDOR_HALF + gap + presentedHalfExtent;
   const pieceCenter = roadPos.clone().addScaledVector(binormal, side * initialOffset);
 
   // Slight random longitudinal scatter (along tangent) to break up regularity
@@ -214,12 +224,13 @@ function placePiece(
   // (pieces sit on the ground regardless of ramp height — they are buildings)
   pieceCenter.y = 0;
 
-  // Apply road clearance guarantee using halfDepth as the extent facing the road.
+  // Apply road clearance guarantee using the rotated presentedHalfExtent so
+  // scatter or initial placement overshoot never causes an intrusion.
   const roadCenterXZ = new THREE.Vector3(roadPos.x, 0, roadPos.z);
   const clampedCenter = clampOutsideRoad(
     new THREE.Vector3(pieceCenter.x, 0, pieceCenter.z),
     binormal,
-    halfDepth,
+    presentedHalfExtent,
     roadCenterXZ,
   );
   pieceCenter.x = clampedCenter.x;
@@ -233,8 +244,6 @@ function placePiece(
   // THREE.Quaternion.setFromUnitVectors doesn't work well for arbitrary axes,
   // so we build a rotation matrix from (right, up, forward) basis vectors.
   const faceDir = binormal.clone().multiplyScalar(-side); // inward
-  // Slight random yaw variation for visual interest (±10°)
-  const yawVariation = rng.range(-Math.PI / 18, Math.PI / 18);
   const yawQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawVariation);
   faceDir.applyQuaternion(yawQuat).normalize();
 
@@ -251,6 +260,9 @@ function placePiece(
   pieceGroup.position.copy(pieceCenter);
   pieceGroup.quaternion.copy(quat);
   pieceGroup.name = `${spec.name}_t${t.toFixed(3)}_s${side > 0 ? 'R' : 'L'}`;
+  // Store placement metadata for clearance verification (used by tests).
+  (pieceGroup.userData as Record<string, unknown>).presentedHalfExtent = presentedHalfExtent;
+  (pieceGroup.userData as Record<string, unknown>).placementT = t;
 
   parentGroup.add(pieceGroup);
   return pieceGroup;
