@@ -7,7 +7,6 @@
  */
 import * as THREE from 'three';
 import { makeCanvasTexture, drawPanel, wrapText } from '../utils/canvasText';
-import { makePlaceholder } from './placeholders';
 import { RESUME } from './resume';
 import { COLORS } from '../theme';
 import type { Project } from './resume';
