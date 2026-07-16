@@ -25,6 +25,11 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { NodeIO, Material } from '@gltf-transform/core';
+import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
+import { cloneDocument, getBounds, weld, dedup, prune, draco, simplify, flatten, join } from '@gltf-transform/functions';
+import draco3d from 'draco3dgltf';
+import { MeshoptSimplifier } from 'meshoptimizer';
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -82,11 +87,6 @@ let fullGlbBuffer;
 // Step 2 – Load full GLB into gltf-transform
 // ---------------------------------------------------------------------------
 console.log('[2/4] Loading GLB into gltf-transform ...');
-
-import { NodeIO } from '@gltf-transform/core';
-import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { cloneDocument, getBounds, weld, dedup, prune, draco } from '@gltf-transform/functions';
-import draco3d from 'draco3dgltf';
 
 const encoderModule = await draco3d.createEncoderModule({});
 const decoderModule = await draco3d.createDecoderModule({});
@@ -153,14 +153,43 @@ for (let i = 0; i < masterNodes.length; i++) {
     // leave as zeros
   }
 
-  // Optimize: prune orphans → weld → dedup → DRACO
+  // --- Unify all materials into one so join() can merge every primitive ---
+  // KitBash ships no textures; we override emissive colors at runtime anyway.
+  try {
+    const pieceRoot = pieceDoc.getRoot();
+    const mats = pieceRoot.listMaterials();
+    if (mats.length > 1) {
+      // Keep the first material and reassign all primitives to it
+      const keepMat = mats[0];
+      for (const mesh of pieceRoot.listMeshes()) {
+        for (const prim of mesh.listPrimitives()) {
+          prim.setMaterial(keepMat);
+        }
+      }
+      // Dispose the now-unused materials
+      for (const mat of mats.slice(1)) {
+        mat.dispose();
+      }
+    }
+  } catch (err) {
+    console.warn(`  ${label}  WARN material unify failed: ${err.message}`);
+  }
+
+  // Optimize: prune → weld → simplify (decimate ~50%) → flatten → join → dedup → DRACO
+  let primCountAfter = '?';
   try {
     await pieceDoc.transform(
       prune(),
       weld({ tolerance: 1e-4 }),
+      simplify({ simplifier: MeshoptSimplifier, ratio: 0.5, error: 0.01 }),
+      flatten(),
+      join(),
       dedup(),
       draco({ quantizationVolume: 'scene' }),
     );
+    // Count primitives after merge
+    const meshes = pieceDoc.getRoot().listMeshes();
+    primCountAfter = meshes.reduce((s, m) => s + m.listPrimitives().length, 0);
   } catch (err) {
     console.warn(`  ${label}  WARN optimize failed: ${err.message}`);
   }
@@ -188,7 +217,7 @@ for (let i = 0; i < masterNodes.length; i++) {
   });
   results.push({ name, kb: parseFloat(kb) });
 
-  console.log(`  ${label}  ${String(kb).padStart(8)} KB  bbox=[${bbox.join(', ')}]`);
+  console.log(`  ${label}  ${String(kb).padStart(8)} KB  prims=${primCountAfter}  bbox=[${bbox.join(', ')}]`);
 }
 
 // ---------------------------------------------------------------------------
