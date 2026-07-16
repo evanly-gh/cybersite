@@ -1,0 +1,425 @@
+[
+  {
+    "name": "KB3D_NEC_BldgSM_A_ConcreteBarrier",
+    "file": "neocity/KB3D_NEC_BldgSM_A_ConcreteBarrier.glb",
+    "bbox": [
+      0.3706,
+      1.1269,
+      1.9638
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_A_Main",
+    "file": "neocity/KB3D_NEC_BldgSM_A_Main.glb",
+    "bbox": [
+      3.6207,
+      6.0127,
+      0.6904
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_C_Main",
+    "file": "neocity/KB3D_NEC_BldgSM_C_Main.glb",
+    "bbox": [
+      6.6159,
+      3.8335,
+      4.3259
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_C_NeonSignA",
+    "file": "neocity/KB3D_NEC_BldgSM_C_NeonSignA.glb",
+    "bbox": [
+      3.7278,
+      1.959,
+      0.8553
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_C_NeonSignB",
+    "file": "neocity/KB3D_NEC_BldgSM_C_NeonSignB.glb",
+    "bbox": [
+      0.9655,
+      0.9655,
+      0.1454
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_C_Boxes",
+    "file": "neocity/KB3D_NEC_BldgSM_C_Boxes.glb",
+    "bbox": [
+      1.579,
+      0.7532,
+      1.9218
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_C_Fan",
+    "file": "neocity/KB3D_NEC_BldgSM_C_Fan.glb",
+    "bbox": [
+      0.7035,
+      2.753,
+      0.733
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_C_CratesB",
+    "file": "neocity/KB3D_NEC_BldgSM_C_CratesB.glb",
+    "bbox": [
+      2.8372,
+      1.0805,
+      1.4951
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_C_NeonSignC",
+    "file": "neocity/KB3D_NEC_BldgSM_C_NeonSignC.glb",
+    "bbox": [
+      0.774,
+      3.2703,
+      1.0549
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_C_CratesA",
+    "file": "neocity/KB3D_NEC_BldgSM_C_CratesA.glb",
+    "bbox": [
+      3.6463,
+      1.7678,
+      1.4681
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_C_Pipes",
+    "file": "neocity/KB3D_NEC_BldgSM_C_Pipes.glb",
+    "bbox": [
+      0.8034,
+      2.6093,
+      0.7605
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_C_Shelf",
+    "file": "neocity/KB3D_NEC_BldgSM_C_Shelf.glb",
+    "bbox": [
+      2.2698,
+      2.0337,
+      0.9393
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_C_Containers",
+    "file": "neocity/KB3D_NEC_BldgSM_C_Containers.glb",
+    "bbox": [
+      0.6573,
+      0.6277,
+      1.8647
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_C_Stool",
+    "file": "neocity/KB3D_NEC_BldgSM_C_Stool.glb",
+    "bbox": [
+      0.7169,
+      0.4363,
+      0.7099
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_C_AC",
+    "file": "neocity/KB3D_NEC_BldgSM_C_AC.glb",
+    "bbox": [
+      4.6893,
+      1.8289,
+      0.5733
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_B_FridgeA",
+    "file": "neocity/KB3D_NEC_BldgSM_B_FridgeA.glb",
+    "bbox": [
+      2.3766,
+      1.0723,
+      1.0315
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_B_Bbq",
+    "file": "neocity/KB3D_NEC_BldgSM_B_Bbq.glb",
+    "bbox": [
+      1.3248,
+      1.5892,
+      1.2542
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_B_Umbrella",
+    "file": "neocity/KB3D_NEC_BldgSM_B_Umbrella.glb",
+    "bbox": [
+      3.347,
+      3.446,
+      3.347
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_B_Computers",
+    "file": "neocity/KB3D_NEC_BldgSM_B_Computers.glb",
+    "bbox": [
+      2.5386,
+      2.7785,
+      0.9347
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_B_Main",
+    "file": "neocity/KB3D_NEC_BldgSM_B_Main.glb",
+    "bbox": [
+      3.5337,
+      3.1199,
+      1.5518
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_B_Cart",
+    "file": "neocity/KB3D_NEC_BldgSM_B_Cart.glb",
+    "bbox": [
+      3.023,
+      2.7857,
+      2.8545
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgSM_B_FridgeB",
+    "file": "neocity/KB3D_NEC_BldgSM_B_FridgeB.glb",
+    "bbox": [
+      1.7779,
+      3.1345,
+      1.6255
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgMD_B_Main",
+    "file": "neocity/KB3D_NEC_BldgMD_B_Main.glb",
+    "bbox": [
+      26.7809,
+      57.3356,
+      22.8116
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgLG_A_BuildingB",
+    "file": "neocity/KB3D_NEC_BldgLG_A_BuildingB.glb",
+    "bbox": [
+      22.6709,
+      72.6305,
+      25.1114
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgLG_A_Base",
+    "file": "neocity/KB3D_NEC_BldgLG_A_Base.glb",
+    "bbox": [
+      78.0875,
+      0.6001,
+      59.5948
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgLG_A_BuildingD",
+    "file": "neocity/KB3D_NEC_BldgLG_A_BuildingD.glb",
+    "bbox": [
+      20.0217,
+      19.7844,
+      13.8621
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgLG_A_BuildingC",
+    "file": "neocity/KB3D_NEC_BldgLG_A_BuildingC.glb",
+    "bbox": [
+      11.2671,
+      23.5128,
+      11.3878
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgLG_A_BuildingA",
+    "file": "neocity/KB3D_NEC_BldgLG_A_BuildingA.glb",
+    "bbox": [
+      13.0598,
+      41.6857,
+      17.8878
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgLG_A_Main",
+    "file": "neocity/KB3D_NEC_BldgLG_A_Main.glb",
+    "bbox": [
+      29.864,
+      67.2021,
+      28.9941
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgLG_A_Tree",
+    "file": "neocity/KB3D_NEC_BldgLG_A_Tree.glb",
+    "bbox": [
+      20.1647,
+      11.4621,
+      15.9623
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgMD_A_AntennaA",
+    "file": "neocity/KB3D_NEC_BldgMD_A_AntennaA.glb",
+    "bbox": [
+      1.272,
+      27.048,
+      1.04
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgMD_A_Base",
+    "file": "neocity/KB3D_NEC_BldgMD_A_Base.glb",
+    "bbox": [
+      31.7864,
+      7.1092,
+      16.45
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgMD_A_Banners",
+    "file": "neocity/KB3D_NEC_BldgMD_A_Banners.glb",
+    "bbox": [
+      2.1866,
+      4.1532,
+      0.3373
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgMD_A_Main",
+    "file": "neocity/KB3D_NEC_BldgMD_A_Main.glb",
+    "bbox": [
+      28.4436,
+      13.327,
+      14.6131
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgMD_C_Base",
+    "file": "neocity/KB3D_NEC_BldgMD_C_Base.glb",
+    "bbox": [
+      68.651,
+      2.0409,
+      26.6476
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgMD_C_BuildingA",
+    "file": "neocity/KB3D_NEC_BldgMD_C_BuildingA.glb",
+    "bbox": [
+      5.8825,
+      15.3793,
+      3.5546
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgMD_C_Banners",
+    "file": "neocity/KB3D_NEC_BldgMD_C_Banners.glb",
+    "bbox": [
+      4.4174,
+      8.3904,
+      22.9315
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgMD_C_AntennaA",
+    "file": "neocity/KB3D_NEC_BldgMD_C_AntennaA.glb",
+    "bbox": [
+      1.272,
+      27.048,
+      1.04
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgMD_C_Main",
+    "file": "neocity/KB3D_NEC_BldgMD_C_Main.glb",
+    "bbox": [
+      49.1085,
+      57.8597,
+      23.1987
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgLG_C_AntennaA",
+    "file": "neocity/KB3D_NEC_BldgLG_C_AntennaA.glb",
+    "bbox": [
+      1.0524,
+      31.0694,
+      1.2189
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgLG_C_AntennaD",
+    "file": "neocity/KB3D_NEC_BldgLG_C_AntennaD.glb",
+    "bbox": [
+      0.7977,
+      20.7469,
+      0.9757
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgLG_C_AntennaC",
+    "file": "neocity/KB3D_NEC_BldgLG_C_AntennaC.glb",
+    "bbox": [
+      0.5453,
+      13.7876,
+      0.4196
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgLG_C_AntennaB",
+    "file": "neocity/KB3D_NEC_BldgLG_C_AntennaB.glb",
+    "bbox": [
+      0.5295,
+      13.7711,
+      0.6476
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgLG_C_Base",
+    "file": "neocity/KB3D_NEC_BldgLG_C_Base.glb",
+    "bbox": [
+      36.5503,
+      7.2127,
+      38.2221
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgLG_C_Main",
+    "file": "neocity/KB3D_NEC_BldgLG_C_Main.glb",
+    "bbox": [
+      35.227,
+      142.6311,
+      33.8571
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgLG_B_AntennaA",
+    "file": "neocity/KB3D_NEC_BldgLG_B_AntennaA.glb",
+    "bbox": [
+      5.9228,
+      41.2463,
+      7.1912
+    ]
+  },
+  {
+    "name": "KB3D_NEC_BldgLG_B_Main",
+    "file": "neocity/KB3D_NEC_BldgLG_B_Main.glb",
+    "bbox": [
+      54.5732,
+      201.0587,
+      45.3777
+    ]
+  }
+]
