@@ -21,7 +21,10 @@ describe('route', () => {
     const f = roadFrame(0.5);
     expect(f.tangent.length()).toBeCloseTo(1, 3);
     expect(f.binormal.length()).toBeCloseTo(1, 3);
+    expect(f.normal.length()).toBeCloseTo(1, 3);
     expect(f.tangent.dot(f.binormal)).toBeCloseTo(0, 3);
+    expect(f.tangent.dot(f.normal)).toBeCloseTo(0, 3);
+    expect(f.binormal.dot(f.normal)).toBeCloseTo(0, 3);
   });
 
   it('ramp/scaffold heights are encoded', () => {

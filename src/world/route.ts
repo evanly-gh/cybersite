@@ -55,26 +55,84 @@ export const ROUTE_LENGTH: number = curve.getLength();
 // ──────────────────────────────────────────────────────────────────────────────
 
 // Each entry: [semantic_t, arc_length_t]
-// arc_length_t values derived by finding the curve's closest arc-length
-// parameter to each named waypoint's position (measured at build time).
-const T_REMAP: [number, number][] = [
-  [0.000, 0.0000],  // introStart
-  [0.120, 0.0495],  // aboutStart
-  [0.280, 0.2860],  // aboutEnd
-  [0.320, 0.3346],  // shibuya
-  [0.360, 0.3773],  // ramp1Base
-  [0.410, 0.4095],  // flip1Apex (ramp1Lip skipped to preserve monotonicity)
-  [0.460, 0.4339],  // scaffoldDeck
-  [0.520, 0.4637],  // scaffoldEnd
-  [0.545, 0.4795],  // ramp2Lip
-  [0.570, 0.4953],  // flip2Apex
-  [0.620, 0.5216],  // descendTop
-  [0.680, 0.5466],  // roadResume
-  [0.760, 0.6241],  // researchMid
-  [0.840, 0.7015],  // researchEnd
-  [0.890, 0.7279],  // bridgeStart
-  [1.000, 1.0000],  // bridgeEnd
-];
+// arc_length_t values are computed at module load from the actual waypoints by
+// sampling the curve at many uniform raw-parameter steps, accumulating chord
+// lengths, then interpolating each waypoint's fraction of the total arc length.
+// This ensures the remap stays correct if waypoints ever change.
+
+/** Build a cumulative chord-length table at N uniform raw-parameter samples. */
+function buildArcTable(n: number): { u: number; s: number }[] {
+  const table: { u: number; s: number }[] = [{ u: 0, s: 0 }];
+  let prev = curve.getPoint(0);
+  let total = 0;
+  for (let i = 1; i <= n; i++) {
+    const u = i / n;
+    const pt = curve.getPoint(u);
+    total += prev.distanceTo(pt);
+    table.push({ u, s: total });
+    prev = pt;
+  }
+  return table;
+}
+
+/** Interpolate arc-length fraction for a given raw parameter u ∈ [0,1]. */
+function arcFractionAt(u: number, table: { u: number; s: number }[]): number {
+  const total = table[table.length - 1].s;
+  if (total === 0) return 0;
+  for (let i = 1; i < table.length; i++) {
+    if (u <= table[i].u) {
+      const t0 = table[i - 1], t1 = table[i];
+      const alpha = (u - t0.u) / (t1.u - t0.u);
+      return (t0.s + alpha * (t1.s - t0.s)) / total;
+    }
+  }
+  return 1;
+}
+
+// Compute arc-length fractions for each waypoint index at module load.
+const _arcTable = buildArcTable(2000);
+const _n = WAYPOINTS.length - 1; // number of intervals
+
+function _arcAt(idx: number): number {
+  return arcFractionAt(idx / _n, _arcTable);
+}
+
+// Waypoint indices used as remap anchors:
+//   introStart=0, aboutStart=1, aboutEnd=2, shibuya=3, ramp1Base=4,
+//   flip1Apex=6 (ramp1Lip idx=5 has no semantic-t anchor — it is a shape
+//               waypoint only), scaffoldDeck=7, scaffoldEnd=8, ramp2Lip=9,
+//   flip2Apex=10, descendTop=11, roadResume=12, researchMid=13,
+//   researchEnd=14, bridgeStart=15, bridgeEnd=16.
+const T_REMAP: [number, number][] = (() => {
+  const table: [number, number][] = [
+    [0.000, _arcAt(0)],   // introStart
+    [0.120, _arcAt(1)],   // aboutStart
+    [0.280, _arcAt(2)],   // aboutEnd
+    [0.320, _arcAt(3)],   // shibuya
+    [0.360, _arcAt(4)],   // ramp1Base
+    [0.410, _arcAt(6)],   // flip1Apex (ramp1Lip idx=5 has no semantic-t anchor)
+    [0.460, _arcAt(7)],   // scaffoldDeck
+    [0.520, _arcAt(8)],   // scaffoldEnd
+    [0.545, _arcAt(9)],   // ramp2Lip
+    [0.570, _arcAt(10)],  // flip2Apex
+    [0.620, _arcAt(11)],  // descendTop
+    [0.680, _arcAt(12)],  // roadResume
+    [0.760, _arcAt(13)],  // researchMid
+    [0.840, _arcAt(14)],  // researchEnd
+    [0.890, _arcAt(15)],  // bridgeStart
+    [1.000, _arcAt(16)],  // bridgeEnd
+  ];
+  // Guarantee monotonicity of the arc-length column.
+  for (let i = 1; i < table.length; i++) {
+    if (table[i][1] <= table[i - 1][1]) {
+      throw new Error(
+        `T_REMAP arc-length column is not monotonically increasing at index ${i}: ` +
+        `${table[i - 1][1]} → ${table[i][1]}`
+      );
+    }
+  }
+  return table;
+})();
 
 /** Map semantic t ∈ [0,1] → arc-length t ∈ [0,1] via piecewise linear interp. */
 function semanticToArc(t: number): number {
@@ -147,13 +205,14 @@ export function roadFrame(t: number): RoadFrame {
 export const ZONES: Record<string, [number, number]> = {
   intro:    [0.00, 0.12],
   about:    [0.12, 0.28],
-  shibuya:  [0.28, 0.36],
-  ramp1:    [0.36, 0.46],
-  scaffold: [0.46, 0.62],
-  ramp2:    [0.52, 0.62],
-  descent:  [0.62, 0.68],
+  turn:     [0.28, 0.36],   // Shibuya 90° right turn
+  ramp1:    [0.36, 0.46],   // projects-ramp1 (backflip 1, 2 big projects)
+  scaffold: [0.46, 0.52],   // scaffold-ride
+  ramp2:    [0.52, 0.62],   // projects-ramp2 (backflip 2, 3 small projects)
+  descend:  [0.62, 0.68],
   research: [0.68, 0.84],
-  bridge:   [0.84, 1.00],
+  lift:     [0.84, 0.89],   // buffer/lift onto bridge
+  bridge:   [0.89, 1.00],   // bridge/finale
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
