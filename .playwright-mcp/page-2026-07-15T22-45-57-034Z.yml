@@ -1,0 +1,189 @@
+- generic [active] [ref=f2e1]:
+  - link "Skip intro" [ref=f2e2] [cursor=pointer]:
+    - /url: "#post-hero"
+  - img "Animated portfolio intro — content repeated below" [ref=f2e3]:
+    - status [ref=f2e5]:
+      - generic [ref=f2e6]: EVAN LI
+      - generic [ref=f2e7]: LINKING NIGHT CITY … 5%
+  - main [ref=f2e8]:
+    - generic "Hero content mirror — same information displayed in 3D scene above" [ref=f2e9]:
+      - heading "About Evan Li" [level=2] [ref=f2e10]
+      - paragraph [ref=f2e11]: Evan Li is a Computer Science + Economics student in the Interdisciplinary Honors Program at the University of Washington (GPA 3.9, expected June 2027). His work centers on ML systems — model compression, on-device inference, and test-time training — building research and product systems that stay fast under tight memory budgets.
+      - heading "Projects" [level=2] [ref=f2e12]
+      - heading "TTT-E2E" [level=3] [ref=f2e13]
+      - paragraph [ref=f2e14]: PyTorch, HF Transformers
+      - paragraph [ref=f2e15]: Dual-branch MAML-style test-time training lifts emotion-classification accuracy 45% → 63% on ELSA, validated across a 4-method eval harness.
+      - heading "RememberMe" [level=3] [ref=f2e16]
+      - paragraph [ref=f2e17]: PyTorch, ResNet-50, FastAPI
+      - paragraph [ref=f2e18]: "Team-lead project: +35% avg F1 over CLIP zero-shot across 25+ CelebA attributes. 6-model pipeline scores 120+ attributes with pgvector semantic search, cutting latency 5s → 2s under 2GB RAM."
+      - heading "Mandarin Learning App" [level=3] [ref=f2e19]
+      - paragraph [ref=f2e20]: React Native, Supabase Edge, Gemini 2.0
+      - paragraph [ref=f2e21]: "Mobile Mandarin tutor: JWT-gated Deno Edge proxy to Gemini 2.0 returns structured JSON for inline grammar corrections."
+      - heading "Bellevue College Hackathon" [level=3] [ref=f2e22]
+      - paragraph [ref=f2e23]: Hackathon
+      - paragraph [ref=f2e24]: 2nd place, 2024.
+      - heading "DubHacks 2025" [level=3] [ref=f2e25]
+      - paragraph [ref=f2e26]: Hackathon
+      - paragraph [ref=f2e27]: Growth Track competitor.
+      - heading "Research" [level=2] [ref=f2e28]
+      - heading "Mobile Intelligence Lab, UW" [level=3] [ref=f2e29]
+      - paragraph [ref=f2e30]: microLLM · MAM Project
+      - paragraph [ref=f2e31]: Model compression and on-device inference research for mobile/edge under the MAM project, advised by Wen Cheng.
+      - heading "LLM Hardware Benchmarking" [level=3] [ref=f2e32]
+      - paragraph [ref=f2e33]: GGUF · llama.cpp
+      - paragraph [ref=f2e34]: Advised by Prof. Ranjay Krishna. Encoder/prefill/decode phase isolation with a cold/warm/3-median protocol; GGUF Q4_K_M quantization cuts memory ~50% at minimal perplexity cost.
+    - region [ref=f2e35]:
+      - paragraph [ref=f2e36]: // 01 EDUCATION
+      - heading "EDUCATION" [level=2] [ref=f2e37]
+      - generic [ref=f2e38]:
+        - paragraph [ref=f2e43]: University of Washington
+        - list [ref=f2e44]:
+          - listitem [ref=f2e45]: B.S. Computer Science
+          - listitem [ref=f2e46]: B.S. Economics
+        - paragraph [ref=f2e47]: › Interdisciplinary Honors Program
+        - generic [ref=f2e48]:
+          - paragraph [ref=f2e49]: Expected June 2027
+          - generic [ref=f2e50]:
+            - generic [ref=f2e51]: GPA
+            - generic [ref=f2e52]: "3.9"
+        - paragraph [ref=f2e53]: // COURSEWORK
+        - list [ref=f2e54]:
+          - listitem [ref=f2e55]: › Deep Learning
+          - listitem [ref=f2e56]: › Data Structures & Parallelism
+          - listitem [ref=f2e57]: › HW/SW Interface
+          - listitem [ref=f2e58]: › Statistical Methods
+    - region [ref=f2e59]:
+      - paragraph [ref=f2e60]: // 02 SKILLS
+      - heading "SKILLS" [level=2] [ref=f2e61]
+      - generic [ref=f2e62]:
+        - generic [ref=f2e63]:
+          - heading "Languages" [level=3] [ref=f2e64]
+          - list "Languages" [ref=f2e65]:
+            - listitem [ref=f2e66]:
+              - button "Python — Languages" [ref=f2e67] [cursor=pointer]: Python
+            - listitem [ref=f2e68]:
+              - button "TypeScript — Languages" [ref=f2e69] [cursor=pointer]: TypeScript
+            - listitem [ref=f2e70]:
+              - button "JavaScript — Languages" [ref=f2e71] [cursor=pointer]: JavaScript
+            - listitem [ref=f2e72]:
+              - button "Java — Languages" [ref=f2e73] [cursor=pointer]: Java
+            - listitem [ref=f2e74]:
+              - button "C/C++ — Languages" [ref=f2e75] [cursor=pointer]: C/C++
+            - listitem [ref=f2e76]:
+              - button "SQL — Languages" [ref=f2e77] [cursor=pointer]: SQL
+        - generic [ref=f2e78]:
+          - heading "ML Frameworks" [level=3] [ref=f2e79]
+          - list "ML Frameworks" [ref=f2e80]:
+            - listitem [ref=f2e81]:
+              - button "PyTorch — ML Frameworks" [ref=f2e82] [cursor=pointer]: PyTorch
+            - listitem [ref=f2e83]:
+              - button "HuggingFace Transformers — ML Frameworks" [ref=f2e84] [cursor=pointer]: HuggingFace Transformers
+            - listitem [ref=f2e85]:
+              - button "scikit-learn — ML Frameworks" [ref=f2e86] [cursor=pointer]: scikit-learn
+            - listitem [ref=f2e87]:
+              - button "OpenCV — ML Frameworks" [ref=f2e88] [cursor=pointer]: OpenCV
+            - listitem [ref=f2e89]:
+              - button "MediaPipe — ML Frameworks" [ref=f2e90] [cursor=pointer]: MediaPipe
+            - listitem [ref=f2e91]:
+              - button "CLIP — ML Frameworks" [ref=f2e92] [cursor=pointer]: CLIP
+            - listitem [ref=f2e93]:
+              - button "SegFormer — ML Frameworks" [ref=f2e94] [cursor=pointer]: SegFormer
+        - generic [ref=f2e95]:
+          - heading "Techniques" [level=3] [ref=f2e96]
+          - list "Techniques" [ref=f2e97]:
+            - listitem [ref=f2e98]:
+              - button "Fine-tuning — Techniques" [ref=f2e99] [cursor=pointer]: Fine-tuning
+            - listitem [ref=f2e100]:
+              - button "Meta-learning (MAML/TTT) — Techniques" [ref=f2e101] [cursor=pointer]: Meta-learning (MAML/TTT)
+            - listitem [ref=f2e102]:
+              - button "RAG — Techniques" [ref=f2e103] [cursor=pointer]: RAG
+            - listitem [ref=f2e104]:
+              - button "Zero-shot classification — Techniques" [ref=f2e105] [cursor=pointer]: Zero-shot classification
+            - listitem [ref=f2e106]:
+              - button "GGUF quantization — Techniques" [ref=f2e107] [cursor=pointer]: GGUF quantization
+            - listitem [ref=f2e108]:
+              - button "Evals design — Techniques" [ref=f2e109] [cursor=pointer]: Evals design
+            - listitem [ref=f2e110]:
+              - button "Vector search — Techniques" [ref=f2e111] [cursor=pointer]: Vector search
+        - generic [ref=f2e112]:
+          - heading "Infrastructure" [level=3] [ref=f2e113]
+          - list "Infrastructure" [ref=f2e114]:
+            - listitem [ref=f2e115]:
+              - button "FastAPI — Infrastructure" [ref=f2e116] [cursor=pointer]: FastAPI
+            - listitem [ref=f2e117]:
+              - button "Docker — Infrastructure" [ref=f2e118] [cursor=pointer]: Docker
+            - listitem [ref=f2e119]:
+              - button "AWS — Infrastructure" [ref=f2e120] [cursor=pointer]: AWS
+            - listitem [ref=f2e121]:
+              - button "Supabase — Infrastructure" [ref=f2e122] [cursor=pointer]: Supabase
+            - listitem [ref=f2e123]:
+              - button "pgvector — Infrastructure" [ref=f2e124] [cursor=pointer]: pgvector
+            - listitem [ref=f2e125]:
+              - button "llama.cpp — Infrastructure" [ref=f2e126] [cursor=pointer]: llama.cpp
+            - listitem [ref=f2e127]:
+              - button "Git — Infrastructure" [ref=f2e128] [cursor=pointer]: Git
+            - listitem [ref=f2e129]:
+              - button "HuggingFace Spaces — Infrastructure" [ref=f2e130] [cursor=pointer]: HuggingFace Spaces
+        - generic [ref=f2e131]:
+          - heading "AI Dev Tools" [level=3] [ref=f2e132]
+          - list "AI Dev Tools" [ref=f2e133]:
+            - listitem [ref=f2e134]:
+              - button "Cursor — AI Dev Tools" [ref=f2e135] [cursor=pointer]: Cursor
+            - listitem [ref=f2e136]:
+              - button "Claude Code — AI Dev Tools" [ref=f2e137] [cursor=pointer]: Claude Code
+            - listitem [ref=f2e138]:
+              - button "GitHub Copilot — AI Dev Tools" [ref=f2e139] [cursor=pointer]: GitHub Copilot
+    - region [ref=f2e140]:
+      - paragraph [ref=f2e141]: // 03 EXPERIENCE
+      - heading "EXPERIENCE" [level=2] [ref=f2e142]
+      - list "Work experience timeline" [ref=f2e143]:
+        - listitem [ref=f2e144]:
+          - generic [ref=f2e146]:
+            - heading "Undergraduate Researcher" [level=3] [ref=f2e147]
+            - paragraph [ref=f2e148]: Mobile Intelligence Lab, University of Washington › Spring 2026 – Present
+            - paragraph [ref=f2e149]: microLLM research under the MAM project — model compression and on-device inference for mobile/edge, advised by Wen Cheng.
+        - listitem [ref=f2e150]:
+          - generic [ref=f2e152]:
+            - heading "Associate" [level=3] [ref=f2e153]
+            - paragraph [ref=f2e154]: Panera Bread › Jun–Dec 2023 · Jun–Aug 2025
+            - paragraph [ref=f2e155]: Issaquah, WA
+        - listitem [ref=f2e156]:
+          - generic [ref=f2e158]:
+            - heading "Retail Associate" [level=3] [ref=f2e159]
+            - paragraph [ref=f2e160]: Ross Dress For Less › Jun–Sep 2023
+            - paragraph [ref=f2e161]: Issaquah, WA
+      - paragraph [ref=f2e162]: // 04 ACHIEVEMENTS
+      - heading "ACHIEVEMENTS" [level=3] [ref=f2e163]
+      - list "Achievements" [ref=f2e164]:
+        - listitem [ref=f2e165]:
+          - generic [ref=f2e166]: ›
+          - paragraph [ref=f2e167]: Bellevue College Hackathon — 2nd Place (2024)
+        - listitem [ref=f2e168]:
+          - generic [ref=f2e169]: ›
+          - paragraph [ref=f2e170]: DubHacks 2025 — Growth Track Competitor
+        - listitem [ref=f2e171]:
+          - generic [ref=f2e172]: ›
+          - paragraph [ref=f2e173]: UW Interdisciplinary Honors Program
+        - listitem [ref=f2e174]:
+          - generic [ref=f2e175]: ›
+          - paragraph [ref=f2e176]: Dean's List — Autumn 2025, Winter 2026
+    - region [ref=f2e177]:
+      - paragraph [ref=f2e178]: // 05 CONTACT
+      - heading "TRANSMISSION" [level=2] [ref=f2e179]
+      - generic [ref=f2e180]:
+        - generic [ref=f2e181]:
+          - link "Send email to evanly@uw.edu" [ref=f2e182] [cursor=pointer]:
+            - /url: mailto:evanly@uw.edu
+            - text: EMAIL
+          - paragraph [ref=f2e183]: evanly@uw.edu
+        - generic [ref=f2e184]:
+          - link "Open LinkedIn profile (opens in new tab)" [ref=f2e185] [cursor=pointer]:
+            - /url: https://linkedin.com/in/evanhly
+            - text: LINKEDIN
+          - paragraph [ref=f2e186]: linkedin.com/in/evanhly
+        - generic [ref=f2e187]:
+          - link "Open GitHub profile (opens in new tab)" [ref=f2e188] [cursor=pointer]:
+            - /url: https://github.com/evanly-gh
+            - text: GITHUB
+          - paragraph [ref=f2e189]: github.com/evanly-gh
+      - generic [ref=f2e190]: © 2026 EVAN LI — BUILT WITH THREE.JS · NIGHT CITY LOOP

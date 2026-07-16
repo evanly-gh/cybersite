@@ -1,0 +1,5 @@
+- generic [active] [ref=e1]:
+  - link "Skip intro" [ref=e2] [cursor=pointer]:
+    - /url: "#post-hero"
+  - img "Animated portfolio intro — content repeated below" [ref=e3]
+  - main
